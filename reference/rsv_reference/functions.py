@@ -400,6 +400,77 @@ KV = Spec(
     scipy_fn=sc.kv,
 )
 
+
+# --- yv --------------------------------------------------------------------
+
+# Integer orders, so the same data checks integer-order implementations.
+_YV_NU = (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0)
+_YV_X = (1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
+_YV_LARGE_X = (50.0, 100.0, 200.0, 500.0, 1e3, 1e4, 1e5, 1e6)
+
+
+def _yv_grid() -> list[tuple[float, float]]:
+    return sorted(itertools.product(_YV_NU, _YV_X))
+
+
+def _yv_large_grid() -> list[tuple[float, float]]:
+    return sorted(itertools.product(_YV_NU, _YV_LARGE_X))
+
+
+def yv_condition(nu: float, x: float) -> mpmath.mpf:
+    """|x Y_nu'(x) / Y_nu(x)|: the relative change of Y per relative change of x.
+
+    An error of e (relative) in any quantity proportional to x, such as the
+    phase x - (2 nu + 1) pi / 4 of the large-x expansion rounded to a double,
+    changes Y by about this times e.
+    """
+    return abs(x * mpmath.bessely(nu, x, derivative=1) / mpmath.bessely(nu, x))
+
+
+YV = Spec(
+    name="yv",
+    description="Bessel function of the second kind Y_nu(x), integer order, x <= 20",
+    inputs=("nu", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "Rounding a quantity proportional to x to a double changes Y by the condition number "
+        "|x Y'/Y| times 2^-53. On this grid the condition number is at most 430 (about nu for "
+        "small x; 426 at nu = 2, x = 10, near a zero), so up to 4.8e-14 is unavoidable; 1e-13 allows that plus a few ulps of further arithmetic, as for kv"
+    ),
+    grid_description=(
+        "nu in {0, 1, 2, 5, 10, 20, 50, 100, 200, 500} x x in {1e-10, 1e-5, 1e-3, 0.01, 0.1, "
+        "0.25, 0.5, 1, 2, 5, 10, 20}; Y overflows to -inf for large nu at small x"
+    ),
+    grid=_yv_grid,
+    mpmath_fn=mpmath.bessely,
+    scipy_name="scipy.special.yv",
+    scipy_fn=sc.yv,
+)
+
+YV_LARGE = Spec(
+    name="yv_large",
+    description="Bessel function of the second kind Y_nu(x), integer order, x from 50 to 1e6",
+    inputs=("nu", "x"),
+    tolerance=5e-10,
+    tolerance_reason=(
+        "For large x, Y oscillates with phase about x - (2 nu + 1) pi / 4, which cannot be "
+        "held exactly in a double: rounding it costs the condition number |x Y'/Y| times "
+        "2^-53. The condition number grows like x and reaches 2.2e6 on this grid (nu = 1, "
+        "x = 1e6), so up to 2.4e-10 is unavoidable for a method that rounds the phase; 5e-10 "
+        "allows 2x that and is 19x the worst SciPy error on this grid (2.6e-11 at nu = 500, "
+        "x = 1e6). It is loose for the smaller x here: the report shows each error"
+    ),
+    grid_description=(
+        "nu in {0, 1, 2, 5, 10, 20, 50, 100, 200, 500} x x in {50, 100, 200, 500, 1e3, 1e4, "
+        "1e5, 1e6}"
+    ),
+    grid=_yv_large_grid,
+    mpmath_fn=mpmath.bessely,
+    scipy_name="scipy.special.yv",
+    scipy_fn=sc.yv,
+)
+
 ALL: tuple[Spec, ...] = (
-    ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV,
+    ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
+    YV_LARGE,
 )  # fmt: skip

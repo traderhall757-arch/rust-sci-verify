@@ -2,6 +2,16 @@ use harness::{Check, Expected, Outcome, Point, finish};
 
 use crate::expected;
 
+/// `Y_n` through the integer-order function (the data has integer orders only).
+fn yn(p: &Point) -> Outcome {
+    Outcome::scalar(puruspe::Yn(p.scalar("nu") as u32, p.scalar("x")))
+}
+
+/// `Y_nu` through the real-order function, which also returns `J_nu`.
+fn ynu(p: &Point) -> Outcome {
+    Outcome::scalar(puruspe::Jnu_Ynu(p.scalar("nu"), p.scalar("x")).1)
+}
+
 #[test]
 fn puruspe_matches_reference() {
     let results = [
@@ -53,6 +63,33 @@ fn puruspe_matches_reference() {
             expected: &[],
         }
         .run(|p| Outcome::scalar(puruspe::Kn(p.scalar("nu") as u32, p.scalar("x")))),
+        Check {
+            function: "puruspe::Yn",
+            dataset: "yv",
+            expected: &[],
+        }
+        .run(yn),
+        Check {
+            function: "puruspe::Yn",
+            dataset: "yv_large",
+            expected: &[],
+        }
+        .run(yn),
+        Check {
+            function: "puruspe::Jnu_Ynu",
+            dataset: "yv",
+            expected: &[],
+        }
+        .run(ynu),
+        Check {
+            function: "puruspe::Jnu_Ynu",
+            dataset: "yv_large",
+            expected: &[Expected {
+                finding: "005-puruspe-jnu_ynu",
+                points: expected::JNU_YNU_LARGE,
+            }],
+        }
+        .run(ynu),
     ];
     finish("puruspe", &results);
 }
