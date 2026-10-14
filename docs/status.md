@@ -128,7 +128,7 @@ _Updated at the end of every session. Start here._
   - Only mean 0, sd 1 is checked; other parameters use the same `erfc` call.
 
 - **Milestone 4, part 5: Student's t distribution** (statrs `StudentsT`;
-  PR from branch `claude/eloquent-einstein-7aly2r`, open):
+  [PR #17](https://github.com/traderhall757-arch/rust-sci-verify/pull/17), open):
   - Datasets `t_cdf` and `t_sf` (1007 points each: 19 df from 0.1 to 1e8 x
     53 x from -1e300 to 1e300) and `t_ppf` (513 points: the same df x 27 p
     from 5e-324 to 1 - 1e-15; p = 0, 1 tagged `pole`, 7 `overflow`). All
