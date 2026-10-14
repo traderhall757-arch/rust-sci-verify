@@ -62,7 +62,9 @@ statrs `gamma(-6.0)` returning `5.94e12` is a finding, not a convention. A
 ## Expected failures
 
 A crate-wrong point does not fail CI only if the check crate lists it as an
-expected failure that cites an existing `findings/NNN-crate-function.md`. CI
+expected failure that cites an existing `findings/NNN-crate-function.md`. Each
+check crate keeps one exact list of input points per finding in
+`src/expected.rs` (a `harness::Expected` names the finding and its points). CI
 fails when:
 
 - a crate-wrong point is not listed;

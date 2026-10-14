@@ -45,5 +45,8 @@ environment from `reference/uv.lock`) is the source of truth.
 ## Adding a function
 
 Add a `Spec` to `reference/rsv_reference/functions.py` (grid, mpmath and SciPy
-callables, tolerance with its reason, tag rules), regenerate, then add a `Check`
-to each relevant `crates/check-<crate>/src/verify.rs`.
+callables, tolerance with its reason, tag rules), test its mpmath route against
+an independent one in `reference/tests/test_functions.py`, regenerate, then add
+a `Check` to each relevant `crates/check-<crate>/src/verify.rs`. Multi-input
+functions list their inputs in the header (e.g. `"inputs":["a","b","x"]`); the
+harness flattens them in that order to match expected failures.
