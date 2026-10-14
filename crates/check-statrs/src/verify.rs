@@ -1,18 +1,29 @@
 use harness::{Check, Expected, Outcome, finish};
 
 use crate::expected;
-use statrs::function::erf;
+use statrs::function::{erf, gamma};
 
 #[test]
 fn statrs_matches_reference() {
-    let results = [Check {
-        function: "statrs::function::erf::erfc",
-        dataset: "erfc",
-        expected: &[Expected {
-            finding: "004-statrs-erfc",
-            points: expected::ERFC,
-        }],
-    }
-    .run(|p| Outcome::scalar(erf::erfc(p.scalar("x"))))];
+    let results = [
+        Check {
+            function: "statrs::function::gamma::gamma",
+            dataset: "gamma",
+            expected: &[Expected {
+                finding: "003-statrs-gamma",
+                points: expected::GAMMA,
+            }],
+        }
+        .run(|p| Outcome::scalar(gamma::gamma(p.scalar("x")))),
+        Check {
+            function: "statrs::function::erf::erfc",
+            dataset: "erfc",
+            expected: &[Expected {
+                finding: "004-statrs-erfc",
+                points: expected::ERFC,
+            }],
+        }
+        .run(|p| Outcome::scalar(erf::erfc(p.scalar("x")))),
+    ];
     finish("statrs", &results);
 }
