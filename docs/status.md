@@ -75,7 +75,7 @@ _Updated at the end of every session. Start here._
     10,000-iteration cap) and loses accuracy as x grows (1.4e-9 at
     Y_500(1e4); up to 4e-7 off the grid).
 
-- **Milestone 4, part 2: `jv`** (Bessel J; [PR #14](https://github.com/traderhall757-arch/rust-sci-verify/pull/14), open):
+- **Milestone 4, part 2: `jv`** (Bessel J; [PR #14](https://github.com/traderhall757-arch/rust-sci-verify/pull/14), merged):
   - Datasets `jv` and `jv_large`: the `yv` grids and tolerances (1e-13 and
     5e-10, from the condition number |x J'/J|, tested). SciPy returns 0 for
     J_200(5) = 4.8e-296 ("SciPy wrong"); its worst on `jv_large` is 2.0e-10.
@@ -93,15 +93,30 @@ _Updated at the end of every session. Start here._
     x = nu + 9845; panics start near nu + 9832 and alternate with values up
     to about nu + 9851.
 
+- **Milestone 4, part 3: `iv`** (modified Bessel I; [PR #15](https://github.com/traderhall757-arch/rust-sci-verify/pull/15), open):
+  - Datasets `iv` (the `yv` grid, 1e-13), `iv_large` (integer orders,
+    x = 50..1000 across the overflow edge, 17 `overflow` tags, 2e-13) and
+    `iv_nonint` (orders 0.25..200.75, x = 1e-5..700, 2e-13); tolerances from
+    |x I'/I| (tested). SciPy returns inf for I_100(720) = 7.1e307.
+  - `puruspe::In` fails 48 points: **finding 007** (high), approved by
+    Claude after the checklist. Three bugs: inf or arbitrary numbers where
+    I_n(x) is tiny (finding 006's `ldexp`, plus `ans` underflowing before
+    normalisation), inf for every x > 709.78 (`exp(x)` overflows in `i0`),
+    errors up to 1.2e-3 for x >> n (Miller start order too low).
+  - `puruspe::Inu_Knu`'s I result fails 49 points: **finding 008** (high),
+    approved by Claude after the checklist. NaN where I underflows; inf for
+    x above about 714 (subnormal K in the Wronskian); accuracy loss from the
+    accumulated recurrence factor `fact` (confirmed; finding 005's J loss
+    has the same code) and from cancellation at small x for negative
+    fractional order.
+
 ## Next
 
-1. **Milestone 4, continued** (next session): `iv` (puruspe `In` and the I
-   result of `Inu_Knu`). `In` uses the same rescaling with the same broken
-   `ldexp` as `Jn`, so expect finding 006's bug where I_n(x) underflows
-   (check it, don't assume it). Non-integer orders need their own dataset
-   (the current ones are integer-order so `Jn`/`Yn`/`Kn` can use them);
-   finding 005 already shows `Jnu_Ynu` is worse there. Rest of Milestone 4 per the roadmap: statrs
-   distributions, the `special` crate, statrs hypothesis tests.
+1. **Milestone 4, continued** (next session): the rest of Milestone 4 per
+   the roadmap: statrs distributions (CDF/PPF/SF vs `scipy.stats`), the
+   `special` crate, then statrs hypothesis tests. Pick one function family
+   per PR. Optional small follow-up: check the K result of `Inu_Knu` on the
+   `kv` grid (not yet checked; same code path as finding 008).
 2. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
@@ -110,7 +125,8 @@ _Updated at the end of every session. Start here._
 ## Decisions recorded (owner, 2026-10-14)
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
-  Finding 006 and the J part of 005 approved by Claude (checklist).
+  Finding 006 and the J part of 005 approved by Claude (checklist); findings
+  007 and 008 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -147,7 +163,7 @@ _Updated at the end of every session. Start here._
 - Under the error metric, a subnormal result flushed to zero is wrong (relative
   to the smallest normal double). SciPy does this for erfc(26.75), erfc(27.0)
   and gammainc(200, 2).
-- `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s. The `yv` grids leave out
+- `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);
   `betainc_switch` about 30 s. Its grid leaves out a = 1e5 with x = 1 - 1e-4,

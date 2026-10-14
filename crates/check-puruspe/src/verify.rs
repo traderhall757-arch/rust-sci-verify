@@ -22,6 +22,16 @@ fn jnu(p: &Point) -> Outcome {
     Outcome::scalar(puruspe::Jnu_Ynu(p.scalar("nu"), p.scalar("x")).0)
 }
 
+/// `I_n` through the integer-order function.
+fn in_(p: &Point) -> Outcome {
+    Outcome::scalar(puruspe::In(p.scalar("nu") as u32, p.scalar("x")))
+}
+
+/// `I_nu` through the real-order function, which also returns `K_nu`.
+fn inu(p: &Point) -> Outcome {
+    Outcome::scalar(puruspe::Inu_Knu(p.scalar("nu"), p.scalar("x")).0)
+}
+
 #[test]
 fn puruspe_matches_reference() {
     let results = [
@@ -136,6 +146,51 @@ fn puruspe_matches_reference() {
             }],
         }
         .run(jnu),
+        Check {
+            function: "puruspe::In",
+            dataset: "iv",
+            expected: &[Expected {
+                finding: "007-puruspe-in",
+                points: expected::IN,
+            }],
+        }
+        .run(in_),
+        Check {
+            function: "puruspe::In",
+            dataset: "iv_large",
+            expected: &[Expected {
+                finding: "007-puruspe-in",
+                points: expected::IN_LARGE,
+            }],
+        }
+        .run(in_),
+        Check {
+            function: "puruspe::Inu_Knu",
+            dataset: "iv",
+            expected: &[Expected {
+                finding: "008-puruspe-inu_knu",
+                points: expected::INU_IV,
+            }],
+        }
+        .run(inu),
+        Check {
+            function: "puruspe::Inu_Knu",
+            dataset: "iv_large",
+            expected: &[Expected {
+                finding: "008-puruspe-inu_knu",
+                points: expected::INU_IV_LARGE,
+            }],
+        }
+        .run(inu),
+        Check {
+            function: "puruspe::Inu_Knu",
+            dataset: "iv_nonint",
+            expected: &[Expected {
+                finding: "008-puruspe-inu_knu",
+                points: expected::INU_IV_NONINT,
+            }],
+        }
+        .run(inu),
     ];
     finish("puruspe", &results);
 }

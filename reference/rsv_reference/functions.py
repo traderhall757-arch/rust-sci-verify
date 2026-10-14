@@ -526,7 +526,100 @@ JV_LARGE = Spec(
     scipy_fn=sc.jv,
 )
 
+# --- iv --------------------------------------------------------------------
+
+# Integer orders on the yv grids (so In can use the data), but larger x stops
+# before the overflow edge (I_0(x) overflows near x = 713.99) and a little past it.
+_IV_LARGE_X = (50.0, 100.0, 200.0, 500.0, 700.0, 710.0, 720.0, 1000.0)
+# Non-integer orders, for implementations of real order only.
+_IV_NONINT_NU = (0.25, 0.5, 1.5, 2.7, 10.5, 25.25, 100.5, 200.75)
+_IV_NONINT_X = (1e-5, 0.01, 0.1, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 500.0, 700.0)
+
+
+def _iv_large_grid() -> list[tuple[float, float]]:
+    return sorted(itertools.product(_YV_NU, _IV_LARGE_X))
+
+
+def _iv_nonint_grid() -> list[tuple[float, float]]:
+    return sorted(itertools.product(_IV_NONINT_NU, _IV_NONINT_X))
+
+
+def iv_condition(nu: float, x: float) -> mpmath.mpf:
+    """|x I_nu'(x) / I_nu(x)|: the relative change of I per relative change of x.
+
+    About nu for small x and about x for large x (I grows like e^x).
+    """
+    return abs(x * mpmath.besseli(nu, x, derivative=1) / mpmath.besseli(nu, x))
+
+
+IV = Spec(
+    name="iv",
+    description="Modified Bessel function of the first kind I_nu(x), integer order, x <= 20",
+    inputs=("nu", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "Rounding a quantity proportional to x to a double changes I by the condition number "
+        "|x I'/I| times 2^-53. On this grid the condition number is at most 201 (about nu for "
+        "small x), so up to 2.2e-14 is unavoidable; 1e-13 allows that plus a few ulps of "
+        "further arithmetic, as for jv; SciPy's worst on this grid is 6.2e-14 (nu = 100, "
+        "x = 0.1). Results below 2.2e-308 are judged relative to that number (conventions), "
+        "so the underflowed I_500(1e-10) etc. need no special rule"
+    ),
+    grid_description=(
+        "nu in {0, 1, 2, 5, 10, 20, 50, 100, 200, 500} x x in {1e-10, 1e-5, 1e-3, 0.01, 0.1, "
+        "0.25, 0.5, 1, 2, 5, 10, 20} (the yv grid); I underflows to 0 for large nu at small x"
+    ),
+    grid=_yv_grid,
+    mpmath_fn=mpmath.besseli,
+    scipy_name="scipy.special.iv",
+    scipy_fn=sc.iv,
+)
+
+IV_LARGE = Spec(
+    name="iv_large",
+    description="Modified Bessel function of the first kind I_nu(x), integer order, x from 50 to 1000",
+    inputs=("nu", "x"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "For large x, I grows like e^(nu eta) with nu eta about x (uniform expansion, DLMF "
+        "10.41.3); rounding that exponent to a double costs the condition number |x I'/I| "
+        "times 2^-53. On this grid the condition number is at most 876 at a finite point "
+        "(nu = 500, x = 720), so up to 9.7e-14 is unavoidable for a method that rounds the "
+        "exponent; 2e-13 allows 2x that. SciPy's worst finite result here is 1.7e-13 (nu = "
+        "500, x = 710); it returns inf for I_100(720) = 7.1e307"
+    ),
+    grid_description=(
+        "nu in {0, 1, 2, 5, 10, 20, 50, 100, 200, 500} x x in {50, 100, 200, 500, 700, 710, "
+        "720, 1000}; I overflows from x = 720 for nu <= 50 and at x = 1000 for every nu"
+    ),
+    grid=_iv_large_grid,
+    mpmath_fn=mpmath.besseli,
+    scipy_name="scipy.special.iv",
+    scipy_fn=sc.iv,
+)
+
+IV_NONINT = Spec(
+    name="iv_nonint",
+    description="Modified Bessel function of the first kind I_nu(x), non-integer order",
+    inputs=("nu", "x"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "Same reasoning as iv and iv_large: the condition number |x I'/I| is at most 728 on "
+        "this grid (nu = 200.75, x = 700), so up to 8.1e-14 is unavoidable; 2e-13 allows 2x "
+        "that, the same as iv_large. SciPy's worst on this grid is 8.0e-14 (nu = 100.5, "
+        "x = 0.1)"
+    ),
+    grid_description=(
+        "nu in {0.25, 0.5, 1.5, 2.7, 10.5, 25.25, 100.5, 200.75} x x in {1e-5, 0.01, 0.1, 1, "
+        "2, 5, 10, 20, 50, 100, 500, 700}; I underflows to 0 for large nu at small x"
+    ),
+    grid=_iv_nonint_grid,
+    mpmath_fn=mpmath.besseli,
+    scipy_name="scipy.special.iv",
+    scipy_fn=sc.iv,
+)
+
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
-    YV_LARGE, JV, JV_LARGE,
+    YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT,
 )  # fmt: skip
