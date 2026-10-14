@@ -776,7 +776,251 @@ NORM_PPF = Spec(
     input_tags=_norm_ppf_tags,
 )
 
+
+# --- Student's t distribution ------------------------------------------------
+
+# Degrees of freedom: heavy tails (0.1 .. 2.5), small integers, and large values
+# where t approaches the standard normal.
+_T_DF = (0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.5, 10.0, 20.0, 50.0, 100.0,
+         1e3, 1e4, 1e5, 1e6, 1e8)  # fmt: skip
+_T_X = (1e-300, 1e-10, 0.01, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0,
+        15.0, 20.0, 30.0, 40.0, 100.0, 1e3, 1e5, 1e10, 1e20, 1e50, 1e100, 1e300)  # fmt: skip
+
+
+def _t_x_grid() -> list[tuple[float, float]]:
+    xs = sorted({0.0, *_T_X, *(-x for x in _T_X)})
+    return [(df, x) for df in _T_DF for x in xs]
+
+
+def _mp_betainc_cf(a: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """I_x(a, b) for 0 < x < 1 by the continued fraction DLMF 8.17.22,
+
+        I_x(a, b) = x^a (1-x)^b / (a B(a, b)) * 1 / (1 + d_1 / (1 + d_2 / (1 + ...))),
+
+    d_(2m+1) = -(a+m)(a+b+m) x / ((a+2m)(a+2m+1)), d_(2m) = m(b-m) x / ((a+2m-1)(a+2m)),
+    evaluated with the modified Lentz method for x <= (a+1)/(a+b+2), where it
+    converges fast, and through I_x(a, b) = 1 - I_(1-x)(b, a) otherwise.
+
+    The t datasets use it instead of _mp_betainc, whose series needs about
+    1/(1-x) terms (1e8 for df = 1e8 at |t| = 1), and instead of mpmath.betainc,
+    whose hypergeometric evaluation fails to converge for df >= 1e5. Tested
+    against both and against closed forms in tests/test_functions.py.
+    """
+    y = mpmath.fsub(1, x, exact=True)
+    if x > (a + 1) / (a + b + 2):
+        return 1 - _mp_betainc_cf(b, a, y)
+    eps = mpmath.mpf(2) ** (-mpmath.mp.prec - 10)
+    tiny = mpmath.mpf(2) ** (-10 * mpmath.mp.prec)
+    with mpmath.extraprec(30):
+        f = c = mpmath.mpf(1)
+        d = mpmath.mpf(0)
+        for n in range(1, 10**7):
+            m = n // 2
+            if n % 2:
+                term = -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))
+            else:
+                term = m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m))
+            d = 1 + term * d
+            d = 1 / (d if d != 0 else tiny)
+            c = 1 + term / c
+            c = c if c != 0 else tiny
+            delta = c * d
+            f *= delta
+            if abs(delta - 1) < eps:
+                break
+        else:
+            raise ArithmeticError(f"betainc continued fraction ({a}, {b}, {x}) did not converge")
+        # f converges to 1 + d_1 / (1 + d_2 / (1 + ...)) (Lentz from b_0 = 1).
+        return x**a * y**b / (a * mpmath.beta(a, b)) / f
+
+
+def _mp_t_lower_tail(df: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(-|x|) for the t distribution with df degrees of freedom (A&S 26.7.1,
+    DLMF 8.17.2): F(-|x|) = I_h(df/2, 1/2) / 2 with h = df / (df + x^2).
+
+    h is exact at the working precision for exact double inputs except when
+    x^2 / df is below the precision (then F rounds to 1/2 as a double anyway);
+    z = 1 - h = x^2 / (df + x^2) is passed separately, so the complement
+    I_h(a, b) = 1 - I_z(b, a), taken where h is above the mean, never forms
+    1 minus a number near 1.
+    """
+    if x == 0:
+        return mpmath.mpf(1) / 2
+    half = mpmath.mpf(1) / 2
+    a = df / 2
+    x2 = x * x
+    h = df / (df + x2)
+    z = x2 / (df + x2)
+    if h > (a + 1) / (a + half + 2):
+        return (1 - _mp_betainc_cf(half, a, z)) / 2
+    return _mp_betainc_cf(a, half, h) / 2
+
+
+def _mp_t_cdf(df: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    tail = _mp_t_lower_tail(df, x)
+    return tail if x <= 0 else 1 - tail
+
+
+def _mp_t_sf(df: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    return _mp_t_cdf(df, -x)
+
+
+def _mp_t_pdf(df: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    # A&S 26.7.1.
+    return (1 + x * x / df) ** (-(df + 1) / 2) / (mpmath.sqrt(df) * mpmath.beta(df / 2, 0.5))
+
+
+def t_cdf_condition(df: float, x: float) -> mpmath.mpf:
+    """|x f(x) / F(x)|: the relative change of F per relative change of x.
+
+    About x^2 where t is close to normal and tends to df in the power-law tail
+    (F(x) is about C |x|^-df there); the survival function has the same
+    condition number at -x.
+    """
+    df, x = mpmath.mpf(df), mpmath.mpf(x)
+    return abs(x * _mp_t_pdf(df, x) / _mp_t_cdf(df, x))
+
+
+def _t_ppf_grid() -> list[tuple[float, float]]:
+    # Both tails (p = 10^-k and the doubles nearest 1 - 10^-k), the smallest
+    # subnormal, the bulk, and points just off 1/2; p = 0 and 1 are poles.
+    lower = [5e-324, 1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4]
+    upper = [0.6, 0.75, 0.9, 0.95, 0.99, 0.999, 1 - 1e-5, 1 - 1e-10, 1 - 1e-15]
+    middle = [0.5 - 1e-10, 0.5, 0.5 + 1e-10]
+    ps = sorted({0.0, 1.0, *lower, *middle, *upper})
+    return [(df, p) for df in _T_DF for p in ps]
+
+
+def _t_ppf_tags(df: float, p: float) -> list[str]:
+    # The quantile is -inf at p = 0 and +inf at p = 1.
+    return [POLE] if p in (0.0, 1.0) else []
+
+
+def _mp_t_ppf(df: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """The x with F(x) = p (0 < p < 1), by Newton's method on log F(-e^u).
+
+    p is an exact double, so 1 - p is exact at any working precision above 53
+    bits and the upper half uses the symmetry ppf(p) = -ppf(1 - p). In u =
+    log|x| the function log F(-e^u) is smooth and decreasing, with derivative
+    -|x| f(x) / F(x) (the condition number); bisection brackets the root to
+    within 1e-3 and Newton's method then converges quadratically.
+    """
+    half = mpmath.mpf(1) / 2
+    if p == half:
+        return mpmath.mpf(0)
+    if p > half:
+        return -_mp_t_ppf(df, 1 - p)
+    eps = mpmath.mpf(10) ** (-mpmath.mp.dps - 5)
+    with mpmath.extradps(20):
+        log_p = mpmath.log(p)
+
+        def g(u: mpmath.mpf) -> mpmath.mpf:
+            return mpmath.log(_mp_t_lower_tail(df, mpmath.exp(u))) - log_p
+
+        lo, hi = mpmath.mpf(-1), mpmath.mpf(1)
+        while g(lo) <= 0:
+            lo *= 2
+        while g(hi) >= 0:
+            hi *= 2
+        while hi - lo > mpmath.mpf(1) / 1000:
+            mid = (lo + hi) / 2
+            if g(mid) > 0:
+                lo = mid
+            else:
+                hi = mid
+        u = (lo + hi) / 2
+        for _ in range(100):
+            x = mpmath.exp(u)
+            slope = -x * _mp_t_pdf(df, x) / _mp_t_lower_tail(df, x)
+            step = g(u) / slope
+            u -= step
+            if abs(step) <= eps:
+                return -mpmath.exp(u)
+    raise ArithmeticError(f"t_ppf({df}, {p}) did not converge")
+
+
+_T_DF_DESCRIPTION = (
+    "df in {0.1, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10, 20, 50, 100, 1e3, 1e4, 1e5, 1e6, 1e8}"
+)
+
+T_CDF = Spec(
+    name="t_cdf",
+    description="Student's t cumulative distribution function F(x; df) (location 0, scale 1)",
+    inputs=("df", "x"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "Rounding a quantity proportional to x or x^2 (such as x^2 / df) to a double changes F "
+        "by the condition number |x f(x) / F(x)| times 2^-53. It is about x^2 where t is close "
+        "to normal and tends to df in the power-law tail; its largest value at a normal result "
+        "on this grid is 901 (df = 1e8, x = -30), so up to 1.0e-13 is unavoidable for a method "
+        "that rounds such a quantity; 2e-13 allows about 2x that, as for norm_cdf. SciPy's worst "
+        "error here is 1.03e-13 (df = 1e4, x = -30), except that it returns 0.5 at x = +-1e-10 "
+        "for df = 1 (error 6.4e-11) and 0 at x = -1e300 for df <= 1. Results below 2.2e-308 "
+        "are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_T_DF_DESCRIPTION} x x = 0 and +-{{1e-300, 1e-10, 0.01, 0.1, 0.25, 0.5, 1, 1.5, 2, "
+        "3, 4, 5, 7.5, 10, 15, 20, 30, 40, 100, 1e3, 1e5, 1e10, 1e20, 1e50, 1e100, 1e300}; the "
+        "lower tail decays like |x|^-df, so it is 0 as a double for large |x| unless df is small"
+    ),
+    grid=_t_x_grid,
+    mpmath_fn=_mp_t_cdf,
+    scipy_name="scipy.stats.t.cdf",
+    scipy_fn=lambda df, x: st.t.cdf(x, df),
+)
+
+T_SF = Spec(
+    name="t_sf",
+    description="Student's t survival function 1 - F(x; df) = F(-x; df) (location 0, scale 1)",
+    inputs=("df", "x"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "1 - F(x) = F(-x) and the grid is symmetric, so the reasoning of t_cdf applies "
+        "mirrored: the condition number |x f(x) / (1 - F(x))| reaches 901 at a normal result "
+        "(df = 1e8, x = 30), so up to 1.0e-13 is unavoidable; 2e-13 allows about 2x that. SciPy's "
+        "worst error here is 1.03e-13 (df = 1e4, x = 30), except that it returns 0.5 at "
+        "x = +-1e-10 for df = 1 and 0 at x = 1e300 for df <= 1"
+    ),
+    grid_description=f"the t_cdf grid ({_T_DF_DESCRIPTION} x 53 values of x)",
+    grid=_t_x_grid,
+    mpmath_fn=_mp_t_sf,
+    scipy_name="scipy.stats.t.sf",
+    scipy_fn=lambda df, x: st.t.sf(x, df),
+)
+
+T_PPF = Spec(
+    name="t_ppf",
+    description="Student's t quantile function F^-1(p; df) (location 0, scale 1)",
+    inputs=("df", "p"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "p and df are exact doubles and 1 - p is exact for p >= 1/2, but in the tail the "
+        "quantile is |x| = exp(L) with L = log|x| of the order of log(1/p) / df; rounding L "
+        "(or 1/df, which multiplies it) to a double changes x by |L| times 2^-53. The largest "
+        "|L| at a finite, normal quantile on this grid is 689.6 (df = 1, p = 1e-300, "
+        "x = -3.2e299), so up to 7.7e-14 is unavoidable; 2e-13 allows 2.6x that and matches "
+        "t_cdf. SciPy's worst error at the points it gets within tolerance is 1.3e-14; it fails "
+        "36 points: up to 4.3e-7 off at p = 1/2 +- 1e-10 for 1 <= df <= 20 (0 for df = 4), "
+        "5e-4 to 9e-4 off at p = 5e-324 for df >= 1000, +inf (wrong sign) at p = 5e-324 for "
+        "2.5 <= df <= 100 (also at 1e-300 for df <= 10), and quantiles capped near -1e153 for "
+        "df <= 1.5"
+    ),
+    grid_description=(
+        f"{_T_DF_DESCRIPTION} x p in {{0, 5e-324, 1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, "
+        "1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, 1/2 - 1e-10, 1/2, 1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, "
+        "0.99, 0.999, and the doubles nearest 1 - 1e-5, 1 - 1e-10, 1 - 1e-15, 1}; p = 0 and 1 "
+        "are tagged pole (the quantile is -inf and +inf); quantiles beyond the largest double "
+        "(df <= 1 with tiny p) are tagged overflow"
+    ),
+    grid=_t_ppf_grid,
+    mpmath_fn=_mp_t_ppf,
+    scipy_name="scipy.stats.t.ppf",
+    scipy_fn=lambda df, p: st.t.ppf(p, df),
+    input_tags=_t_ppf_tags,
+)
+
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
+    T_CDF, T_SF, T_PPF,
 )  # fmt: skip

@@ -2,7 +2,9 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::compare::{Verdict, classify};
 use crate::data::{Dataset, Header, Point};
@@ -16,6 +18,10 @@ pub enum Outcome {
     Error(String),
     /// The crate panicked; always counted as crate wrong.
     Panic(String),
+    /// The crate returned nothing within the time limit of
+    /// [`Check::run_with_time_limit`] (e.g. an endless loop); always counted
+    /// as crate wrong.
+    Timeout(Duration),
 }
 
 impl Outcome {
@@ -114,21 +120,85 @@ impl Check {
     /// Evaluates `f` at every point of an already loaded dataset.
     #[must_use]
     pub fn run_on(self, data: Dataset, f: impl Fn(&Point) -> Outcome) -> FunctionResult {
-        // Panics inside the target crate are results, not test failures;
-        // silence the panic hook so they do not flood the output. The hook is
-        // global, so concurrent runs take turns to restore it correctly.
-        static HOOK: Mutex<()> = Mutex::new(());
-        let _turn = HOOK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
+        let outcomes = silenced_panics(|| {
+            data.points
+                .iter()
+                .map(|point| evaluate(&f, point))
+                .collect()
+        });
+        self.judge(data, outcomes)
+    }
+
+    /// Like [`Check::run`], but a point that has not returned within `limit`
+    /// gets [`Outcome::Timeout`], so a crate that loops forever cannot hang
+    /// the test.
+    ///
+    /// Every point runs on its own thread, all at once, and the limit counts
+    /// from the start of the run. A thread that has not finished is
+    /// abandoned: it keeps running (and using a CPU, if it loops) until the
+    /// test process exits, so put such a check last in its test.
+    ///
+    /// # Panics
+    ///
+    /// If the dataset cannot be loaded or a thread cannot be started.
+    #[must_use]
+    pub fn run_with_time_limit(
+        self,
+        limit: Duration,
+        f: impl Fn(&Point) -> Outcome + Send + Sync + 'static,
+    ) -> FunctionResult {
+        let data = Dataset::load(&crate::workspace_root(), self.dataset)
+            .unwrap_or_else(|e| panic!("{}: {e}", self.dataset));
+        self.run_on_with_time_limit(data, limit, f)
+    }
+
+    /// [`Check::run_with_time_limit`] on an already loaded dataset.
+    ///
+    /// # Panics
+    ///
+    /// If a thread cannot be started.
+    #[must_use]
+    pub fn run_on_with_time_limit(
+        self,
+        data: Dataset,
+        limit: Duration,
+        f: impl Fn(&Point) -> Outcome + Send + Sync + 'static,
+    ) -> FunctionResult {
+        let f = Arc::new(f);
+        let outcomes = silenced_panics(|| {
+            let deadline = Instant::now() + limit;
+            let receivers: Vec<_> = data
+                .points
+                .iter()
+                .map(|point| {
+                    let (tx, rx) = mpsc::channel();
+                    let (f, point) = (Arc::clone(&f), point.clone());
+                    thread::Builder::new()
+                        .spawn(move || {
+                            // The receiver is gone only after a timeout.
+                            let _ = tx.send(evaluate(f.as_ref(), &point));
+                        })
+                        .expect("start a thread");
+                    rx
+                })
+                .collect();
+            receivers
+                .into_iter()
+                .map(|rx| {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    rx.recv_timeout(left).unwrap_or(Outcome::Timeout(limit))
+                })
+                .collect()
+        });
+        self.judge(data, outcomes)
+    }
+
+    fn judge(self, data: Dataset, outcomes: Vec<Outcome>) -> FunctionResult {
         let points = data
             .points
             .into_iter()
-            .map(|point| {
-                let outcome = catch_unwind(AssertUnwindSafe(|| f(&point)))
-                    .unwrap_or_else(|p| Outcome::Panic(panic_message(p.as_ref())));
+            .zip(outcomes)
+            .map(|(point, outcome)| {
                 let (verdict, error) = classify(
                     &outcome,
                     &point,
@@ -143,13 +213,33 @@ impl Check {
                 }
             })
             .collect();
-        std::panic::set_hook(hook);
         FunctionResult {
             check: self,
             header: data.header,
             points,
         }
     }
+}
+
+/// `f(point)`, with a panic turned into [`Outcome::Panic`].
+fn evaluate(f: &impl Fn(&Point) -> Outcome, point: &Point) -> Outcome {
+    catch_unwind(AssertUnwindSafe(|| f(point)))
+        .unwrap_or_else(|p| Outcome::Panic(panic_message(p.as_ref())))
+}
+
+/// Runs `body` with the panic hook silenced. Panics inside the target crate
+/// are results, not test failures, and must not flood the output. The hook is
+/// global, so concurrent runs take turns to restore it correctly.
+fn silenced_panics(body: impl FnOnce() -> Vec<Outcome>) -> Vec<Outcome> {
+    static HOOK: Mutex<()> = Mutex::new(());
+    let _turn = HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let outcomes = body();
+    std::panic::set_hook(hook);
+    outcomes
 }
 
 pub(crate) fn same_inputs(a: &[f64], b: &[f64]) -> bool {
@@ -231,6 +321,45 @@ mod tests {
             r.points[0].outcome,
             Outcome::Panic("non-string panic".into())
         );
+    }
+
+    #[test]
+    fn time_limit_turns_endless_calls_into_timeouts() {
+        let limit = Duration::from_millis(500);
+        let r = NONE.run_on_with_time_limit(data(), limit, |p| {
+            if p.scalar("x") < 0.0 {
+                // Never returns, without using a CPU.
+                loop {
+                    thread::park();
+                }
+            }
+            // Slow but within the limit: still a result.
+            thread::sleep(Duration::from_millis(50));
+            Outcome::scalar(0.1)
+        });
+        assert_eq!(r.points[0].verdict, Verdict::Pass);
+        assert_eq!(r.points[1].outcome, Outcome::Timeout(limit));
+        // Point 1 is an overflow point: a timeout is never an accepted value.
+        assert_eq!(r.points[1].verdict, Verdict::CrateWrong);
+        // Panics are still results, and points keep their dataset order.
+        let r = NONE.run_on_with_time_limit(data(), limit, |p| {
+            assert!(p.scalar("x") > 0.0, "negative");
+            Outcome::scalar(0.1)
+        });
+        assert_eq!(r.points[0].outcome, Outcome::scalar(0.1));
+        assert_eq!(r.points[1].outcome, Outcome::Panic("negative".into()));
+    }
+
+    #[test]
+    fn run_with_time_limit_loads_committed_data() {
+        let check = Check {
+            function: "t::erfcx",
+            dataset: "erfcx",
+            expected: &[],
+        };
+        let r = check.run_with_time_limit(Duration::from_secs(60), |_| Outcome::scalar(0.0));
+        assert_eq!(r.points.len(), r.header.points);
+        assert!(r.points.iter().all(|p| p.outcome == Outcome::scalar(0.0)));
     }
 
     #[test]
