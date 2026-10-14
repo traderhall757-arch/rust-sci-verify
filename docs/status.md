@@ -90,6 +90,10 @@ _Updated at the end of every session. Start here._
 ## Decisions recorded (owner, 2026-10-14)
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
+- **Claude approves future findings itself**, after the confirmation
+  checklist in `findings/README.md` (reproduction, arbiter check, second
+  opinion, off-grid check, root cause). Upstream contact still needs the
+  owner's approval per item.
 - Tolerance 1e-12 accepted for `gammainc` and `betainc` (1e-13 elsewhere);
   **revisit later** (owner's note), e.g. once a Boost/Temme-quality
   implementation shows what is achievable.

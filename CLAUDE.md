@@ -10,6 +10,7 @@ Start every session by reading `docs/status.md`. Read `docs/roadmap.md` only whe
    thresholds, expected failures, conventions, tags or workflow files, with the reason.
    Write "none" if there are none. No cheap greens: never loosen a check to pass.
 3. Every expected failure cites an existing `findings/NNN-crate-function.md` (CI checks).
+   Claude approves findings after the checklist in `findings/README.md` (owner, 2026-10-14).
 4. Tags (pole, overflow, ...) are assigned by rules in `reference/`, never by hand.
    A finite crate value at a pole or overflow point is "crate wrong".
 5. mpmath is the arbiter. A SciPy/crate disagreement is not a bug until mpmath says so.
