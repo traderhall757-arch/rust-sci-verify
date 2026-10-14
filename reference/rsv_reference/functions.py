@@ -5,6 +5,7 @@ import math
 
 import mpmath
 import scipy.special as sc
+import scipy.stats as st
 
 from .spec import POLE, Spec
 
@@ -619,7 +620,163 @@ IV_NONINT = Spec(
     scipy_fn=sc.iv,
 )
 
+
+# --- standard normal distribution ----------------------------------------------
+
+
+def _norm_x_grid() -> list[tuple[float]]:
+    # x = -40..40 step 0.25 (exact in binary) covers both tails down to complete
+    # underflow (the lower tail is subnormal from about -37.52 and 0 below about
+    # -38.49) plus +-10^k decades for tiny and huge |x|.
+    dense = [i / 4 for i in range(-160, 161)]
+    decades = _decades()
+    points = sorted(set(dense + decades + [-d for d in decades]))
+    return [(x,) for x in points]
+
+
+def _mp_norm_cdf(x: mpmath.mpf) -> mpmath.mpf:
+    # Phi(x) = erfc(-x / sqrt(2)) / 2 (DLMF 7.18 / 26.2.29 of A&S), with the
+    # large-argument branch of _mp_erfc for |x| >= sqrt(2) * 1e6.
+    return _mp_erfc(-x / mpmath.sqrt(2)) / 2
+
+
+def _mp_norm_sf(x: mpmath.mpf) -> mpmath.mpf:
+    return _mp_norm_cdf(-x)
+
+
+def norm_cdf_condition(x: float) -> mpmath.mpf:
+    """|x phi(x) / Phi(x)|: the relative change of Phi per relative change of x.
+
+    About x^2 in the lower tail (Phi(x) is about phi(x) / |x| there); the
+    upper-tail survival function has the same condition number at -x.
+    """
+    x = mpmath.mpf(x)
+    return abs(x * mpmath.npdf(x) / _mp_norm_cdf(x))
+
+
+NORM_CDF = Spec(
+    name="norm_cdf",
+    description="Standard normal cumulative distribution function Phi(x) (mean 0, sd 1)",
+    inputs=("x",),
+    tolerance=4e-13,
+    tolerance_reason=(
+        "Rounding a quantity proportional to x (such as x / sqrt(2)) to a double changes Phi "
+        "by the condition number |x phi(x) / Phi(x)| times 2^-53. In the lower tail the "
+        "condition number is about x^2 and reaches 1408 at the last normal result "
+        "(x = -37.5), so up to 1.6e-13 is unavoidable for a method that rounds such a "
+        "quantity; 4e-13 allows 2x that, as for iv_large. SciPy's worst normal result here "
+        "is 1.1e-13 (x = -32.25); it flushes subnormal results at x = -37.75 and -38 to 0. "
+        "Results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        "x = -40..40 step 0.25, plus +-10^k for k = -300..300 step 10; Phi is subnormal "
+        "from about x = -37.52, 0 below about -38.49 and rounds to 1 above about 8.3"
+    ),
+    grid=_norm_x_grid,
+    mpmath_fn=_mp_norm_cdf,
+    scipy_name="scipy.stats.norm.cdf",
+    scipy_fn=st.norm.cdf,
+)
+
+NORM_SF = Spec(
+    name="norm_sf",
+    description="Standard normal survival function Q(x) = 1 - Phi(x) = Phi(-x) (mean 0, sd 1)",
+    inputs=("x",),
+    tolerance=4e-13,
+    tolerance_reason=(
+        "Q(x) = Phi(-x), so the reasoning of norm_cdf applies mirrored: the condition number "
+        "|x phi(x) / Q(x)| is about x^2 in the upper tail and reaches 1408 at x = 37.5, so up "
+        "to 1.6e-13 is unavoidable; 4e-13 allows 2x that. SciPy's worst normal result here is "
+        "1.1e-13 (x = 32.25)"
+    ),
+    grid_description=(
+        "x = -40..40 step 0.25, plus +-10^k for k = -300..300 step 10 (the norm_cdf grid); "
+        "Q is subnormal from about x = 37.52, 0 above about 38.49 and rounds to 1 below "
+        "about -8.3"
+    ),
+    grid=_norm_x_grid,
+    mpmath_fn=_mp_norm_sf,
+    scipy_name="scipy.stats.norm.sf",
+    scipy_fn=st.norm.sf,
+)
+
+
+def _norm_ppf_grid() -> list[tuple[float]]:
+    # Both tails (p = 10^-k and the doubles nearest 1 - 10^-k), the smallest
+    # subnormal, the bulk in steps of 1/64 (exact), and points just off 1/2.
+    tail = [float(f"1e-{k}") for k in range(1, 21)] + [float(f"1e-{k}") for k in range(30, 301, 10)]
+    upper = [1 - float(f"1e-{k}") for k in range(1, 17)]
+    bulk = [i / 64 for i in range(65)]
+    near_half = [0.5 + s * float(f"1e-{k}") for k in (5, 10, 15) for s in (-1, 1)]
+    extremes = [5e-324, 1e-310, 2.0**-1022]
+    return [(p,) for p in sorted(set(tail + upper + bulk + near_half + extremes))]
+
+
+def _norm_ppf_tags(p: float) -> list[str]:
+    # The quantile is -inf at p = 0 and +inf at p = 1.
+    return [POLE] if p in (0.0, 1.0) else []
+
+
+def _mp_norm_ppf(p: mpmath.mpf) -> mpmath.mpf:
+    """The x with Phi(x) = p, by Newton's method on log Phi (0 < p < 1).
+
+    p is an exact double, so 1 - p is exact at any working precision above 53
+    bits and the upper half uses the symmetry ppf(p) = -ppf(1 - p).
+    """
+    if p == mpmath.mpf(1) / 2:
+        return mpmath.mpf(0)
+    if p > mpmath.mpf(1) / 2:
+        return -_mp_norm_ppf(1 - p)
+    # Start from A&S 26.2.23 (error below 4.5e-4) and iterate
+    # x <- x - (log Phi(x) - log p) Phi(x) / phi(x), which converges
+    # quadratically from this start.
+    t = mpmath.sqrt(-2 * mpmath.log(p))
+    x = -(
+        t
+        - (2.515517 + 0.802853 * t + 0.010328 * t**2)
+        / (1 + 1.432788 * t + 0.189269 * t**2 + 0.001308 * t**3)
+    )
+    # The iteration runs 20 digits above the caller's precision, so the stopping
+    # test 10^-(dps + 5) is reachable and the result is good to the caller's.
+    eps = mpmath.mpf(10) ** (-mpmath.mp.dps - 5)
+    with mpmath.extradps(20):
+        log_p = mpmath.log(p)
+        for _ in range(100):
+            cdf = _mp_norm_cdf(x)
+            step = (mpmath.log(cdf) - log_p) * cdf / mpmath.npdf(x)
+            x -= step
+            if abs(step) <= eps * abs(x):
+                return x
+    raise ArithmeticError(f"norm_ppf({p}) did not converge")
+
+
+NORM_PPF = Spec(
+    name="norm_ppf",
+    description="Standard normal quantile function Phi^-1(p) (mean 0, sd 1)",
+    inputs=("p",),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "The input p is an exact double and the quantities a quantile method needs, p - 1/2 "
+        "(exact for 1/4 <= p <= 1 by Sterbenz's lemma), 1 - p (exact for p >= 1/2) and "
+        "log p, are exact or correctly rounded, so nothing beyond a few ulps of arithmetic is "
+        "unavoidable (Wichura's AS 241 reaches about 1e-16). The quantile is "
+        "ill-conditioned in p near p = 1/2 (|p / (x phi(x))| grows without bound) but that "
+        "only matters for an inexact p. 1e-13 as for the other functions; SciPy's worst on "
+        "this grid is 2.1e-16"
+    ),
+    grid_description=(
+        "p = 10^-k for k = 1..20 and 30..300 step 10, the doubles nearest 1 - 10^-k for "
+        "k = 1..16, i/64 for i = 0..64, 1/2 +- 10^-k for k = 5, 10, 15, and 5e-324, 1e-310, "
+        "2^-1022; p = 0 and p = 1 are tagged pole (the quantile is -inf and +inf)"
+    ),
+    grid=_norm_ppf_grid,
+    mpmath_fn=_mp_norm_ppf,
+    scipy_name="scipy.stats.norm.ppf",
+    scipy_fn=st.norm.ppf,
+    input_tags=_norm_ppf_tags,
+)
+
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
-    YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT,
+    YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
 )  # fmt: skip

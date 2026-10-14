@@ -372,3 +372,75 @@ def test_betainc_large_grid_spans_both_tails_above_puruspe_switch():
     grid = functions._betainc_large_grid()
     assert len(grid) == 16 * 9
     assert all(a > 3000 and b > 3000 and 0 < x < 1 for a, b, x in grid)
+
+
+@pytest.mark.parametrize("x", [-38.0, -20.0, -1.5, 0.0, 0.25, 3.0, 8.0])
+def test_norm_cdf_matches_ncdf_and_incomplete_gamma(x):
+    # mpmath.ncdf is a separate implementation; for x < 0 also
+    # Phi(x) = Gamma(1/2, x^2 / 2) / (2 sqrt(pi)) (DLMF 7.11.2 with erfc = 2 Phi(-x sqrt 2)).
+    with mpmath.workdps(50):
+        (x,) = mp(x)
+        assert close(functions._mp_norm_cdf(x), mpmath.ncdf(x))
+        if x < 0:
+            route = mpmath.gammainc(mpmath.mpf(0.5), x * x / 2) / (2 * mpmath.sqrt(mpmath.pi))
+            assert close(functions._mp_norm_cdf(x), route)
+
+
+def test_norm_cdf_and_sf_sum_to_one_and_mirror():
+    with mpmath.workdps(50):
+        for x in mp(-30.0, -2.0, 0.0, 1e-300, 5.0, 1e7):
+            assert close(functions._mp_norm_cdf(x) + functions._mp_norm_sf(x), 1)
+            assert functions._mp_norm_sf(x) == functions._mp_norm_cdf(-x)
+
+
+@pytest.mark.parametrize("p", [5e-324, 1e-300, 1e-20, 0.01, 0.25, 0.5 - 1e-15, 0.75, 1 - 1e-16])
+def test_norm_ppf_inverts_the_cdf(p):
+    # Phi(ppf(p)) = p to far beyond double precision (relative to min(p, 1 - p)).
+    with mpmath.workdps(50):
+        (p,) = mp(p)
+        x = functions._mp_norm_ppf(p)
+        if p < 0.5:
+            assert close(functions._mp_norm_cdf(x), p)
+        else:
+            assert close(functions._mp_norm_sf(x), 1 - p)
+
+
+@pytest.mark.parametrize("p", [0.001, 0.1, 0.3, 0.5 + 1e-10, 0.9])
+def test_norm_ppf_matches_inverse_error_function(p):
+    # ppf(p) = sqrt(2) erfinv(2p - 1) (DLMF 7.17), a different mpmath algorithm.
+    with mpmath.workdps(50):
+        (p,) = mp(p)
+        route = mpmath.sqrt(2) * mpmath.erfinv(2 * p - 1)
+        assert close(functions._mp_norm_ppf(p), route, digits=35)
+        assert functions._mp_norm_ppf(mpmath.mpf(0.5)) == 0
+
+
+def test_norm_ppf_poles_are_tagged_by_rule():
+    assert functions._norm_ppf_tags(0.0) == [POLE]
+    assert functions._norm_ppf_tags(1.0) == [POLE]
+    assert functions._norm_ppf_tags(5e-324) == []
+    assert functions._norm_ppf_tags(1 - 2.0**-53) == []
+
+
+@pytest.mark.parametrize("spec", [functions.NORM_CDF, functions.NORM_SF])
+def test_norm_condition_numbers_match_the_tolerance_reasons(spec):
+    # The largest |x phi / Phi| at a normal, nonzero point of the grid (the lower
+    # tail of the cdf, mirrored for the sf).
+    sign = 1 if spec is functions.NORM_CDF else -1
+    with mpmath.workdps(30):
+        worst = max(
+            functions.norm_cdf_condition(sign * x)
+            for (x,) in spec.grid()
+            if spec.mpmath_fn(mpmath.mpf(x)) >= mpmath.mpf(2) ** -1022
+        )
+    assert 1408 * 0.97 < worst <= 1408
+    assert spec.tolerance >= 2 * worst * 2.0**-53
+
+
+def test_norm_cdf_underflows_where_the_grid_description_says():
+    with mpmath.workdps(30):
+        cdf = functions._mp_norm_cdf
+        assert cdf(mpmath.mpf(-37.51)) > mpmath.mpf(2) ** -1022 > cdf(mpmath.mpf(-37.53))
+        assert cdf(mpmath.mpf(-38.48)) > mpmath.mpf(2) ** -1075 > cdf(mpmath.mpf(-38.50))
+        assert functions._mp_norm_sf(mpmath.mpf(8.28)) > mpmath.mpf(2) ** -54
+        assert functions._mp_norm_sf(mpmath.mpf(8.30)) < mpmath.mpf(2) ** -54
