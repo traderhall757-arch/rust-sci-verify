@@ -1,0 +1,24 @@
+[package]
+name = "check-special"
+version = "0.1.0"
+description = "Verification of the special crate against mpmath and SciPy reference data"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+harness.workspace = true
+# Exact pin: a new special release is checked by the weekly job first, then
+# adopted here in its own pull request. Default features, as a user gets them:
+# `no_std` (elementary functions and lgamma from the libm crate) plus the
+# elliptic and Lambert W modules, which are not checked yet.
+special = "=0.14.2"
+
+[package.metadata.rsv]
+# See scripts/check_api_tests.py.
+role = "check"
+
+[lints]
+workspace = true
