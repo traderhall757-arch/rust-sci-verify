@@ -1301,8 +1301,126 @@ GAMMA_PPF = Spec(
     input_tags=_gamma_ppf_tags,
 )
 
+# --- betaincinv ----------------------------------------------------------------
+
+# The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
+_BETAINCINV_P = (0.0, 5e-324, 1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.25, 0.5,
+                 0.75, 0.9, 0.99, 0.999, 1 - 1e-5, 1 - 1e-10, 1 - 1e-15, 1.0)  # fmt: skip
+
+
+def _betaincinv_grid() -> list[tuple[float, float, float]]:
+    pairs = itertools.product(_BETAINC_AB, repeat=2)
+    return [(a, b, p) for a, b in pairs for p in _BETAINCINV_P]
+
+
+def _mp_betainc_tail(a: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf, y: mpmath.mpf, lower: bool):
+    """I_x(a, b) (lower) or 1 - I_x(a, b) (upper), with y = 1 - x given separately.
+
+    The continued fraction is evaluated on whichever side of the switch point
+    (a+1)/(a+b+2) it converges, at x or at y = 1 - x, so neither tail forms
+    1 minus a number near 1 and both keep full relative precision.
+    """
+    if x <= (a + 1) / (a + b + 2):
+        direct = _mp_betainc_cf(a, b, x)
+        return direct if lower else 1 - direct
+    mirrored = _mp_betainc_cf(b, a, y)  # = 1 - I_x(a, b)
+    return 1 - mirrored if lower else mirrored
+
+
+def _mp_betaincinv(a: mpmath.mpf, b: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """The x with I_x(a, b) = p (0 <= p <= 1), by Newton's method on a logarithm.
+
+    In s = log(x / (1 - x)) both x = 1 / (1 + e^-s) and 1 - x = 1 / (1 + e^s)
+    keep full relative precision, so quantiles near 0 and near 1 are equally
+    accurate. For p <= 1/2 the root of log I = log p, for p > 1/2 the root of
+    log(1 - I) = log(1 - p) (1 - p is exact for a double p at any working
+    precision above 53 bits); both are smooth and monotone in s, with slope
+    x^a (1-x)^b / (B(a, b) I) (respectively over 1 - I). Bracketing from the
+    mean, bisection to within 1e-3 and then Newton's method, as for t_ppf
+    and gamma_ppf. The ends of the support: x = 0 at p = 0, x = 1 at p = 1.
+    """
+    if p == 0 or p == 1:
+        return p
+    lower = p <= mpmath.mpf(1) / 2
+    q = p if lower else 1 - p
+    sign = 1 if lower else -1
+    eps = mpmath.mpf(10) ** (-mpmath.mp.dps - 5)
+    with mpmath.extradps(20):
+        log_q = mpmath.log(q)
+        log_beta = mpmath.log(mpmath.beta(a, b))
+
+        def tail(s: mpmath.mpf) -> mpmath.mpf:
+            x, y = 1 / (1 + mpmath.exp(-s)), 1 / (1 + mpmath.exp(s))
+            return x, y, _mp_betainc_tail(a, b, x, y, lower)
+
+        def g(s: mpmath.mpf) -> mpmath.mpf:
+            # Increasing in s for both branches after the sign.
+            return sign * (mpmath.log(tail(s)[2]) - log_q)
+
+        s0 = mpmath.log(a / b)  # the mean a / (a + b)
+        lo = hi = s0
+        step = mpmath.mpf(1) / 1000
+        while g(lo) > 0:
+            lo -= step
+            step *= 2
+        step = mpmath.mpf(1) / 1000
+        while g(hi) < 0:
+            hi += step
+            step *= 2
+        while hi - lo > mpmath.mpf(1) / 1000:
+            mid = (lo + hi) / 2
+            if g(mid) > 0:
+                hi = mid
+            else:
+                lo = mid
+        s = (lo + hi) / 2
+        for _ in range(100):
+            x, y, t = tail(s)
+            slope = mpmath.exp(a * mpmath.log(x) + b * mpmath.log(y) - log_beta) / t
+            step = sign * (mpmath.log(t) - log_q) / slope
+            s -= step
+            if abs(step) <= eps:
+                return 1 / (1 + mpmath.exp(-s))
+    raise ArithmeticError(f"betaincinv({a}, {b}, {p}) did not converge")
+
+
+BETAINCINV = Spec(
+    name="betaincinv",
+    description=(
+        "Inverse of the regularized incomplete beta function: the x with I_x(a, b) = p "
+        "(the beta distribution's quantile function)"
+    ),
+    inputs=("a", "b", "p"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "a, b and p are exact doubles and 1 - p is exact for p >= 1/2, but in the lower tail the "
+        "quantile is x = exp(L) with L = log(p a B(a, b)) / a approximately; rounding L (or 1/a, "
+        "which multiplies it) to a double changes x by |L| times 2^-53. The largest |L| at a "
+        "nonzero, normal quantile below 1 on this grid is 700.0 (a = 1, b = 1e4, p = 1e-300, "
+        "x = 1e-304), so up to 7.8e-14 is unavoidable; near x = 1 the same holds for 1 - x, which "
+        "moves x by less. 2e-13 allows 2.6x that and matches t_ppf and gamma_ppf. SciPy's worst "
+        "error at the points it gets within tolerance is 2.0e-13 (a = 1000, b = 1e4, p = 0.75); "
+        "it fails 105 points: NaN for 29 points with p <= 1e-300, about 2.2e-308 (just below the "
+        "smallest normal double) where the quantile is smaller (41 points), errors from 1.2e-12 "
+        "to 911x at 33 points with p <= 1e-300 (e.g. 0.375 instead of 0.477 at a = 1000, "
+        "b = 0.5, p = 5e-324), and 2.8e-13 and 2.1e-13 at a = 1000, b = 1e4, p = 0.999 and "
+        "1 - 1e-5"
+    ),
+    grid_description=(
+        "a, b in {0.1, 0.5, 1, 2, 5, 10, 100, 1000, 10000} x p in {0, 5e-324, 1e-300, 1e-100, "
+        "1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999, and the doubles nearest 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15, 1}; the quantile is 0 at p = 0 and 1 at p = 1 (the ends of the "
+        "support, so not poles); for small a the lower-tail quantiles are below the smallest "
+        "double, and for small b the upper-tail quantiles round to 1"
+    ),
+    grid=_betaincinv_grid,
+    mpmath_fn=_mp_betaincinv,
+    scipy_name="scipy.special.betaincinv",
+    scipy_fn=sc.betaincinv,
+)
+
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
-    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
+    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, BETAINCINV,
 )  # fmt: skip

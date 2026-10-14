@@ -777,3 +777,73 @@ def test_gamma_ppf_log_magnitude_matches_the_tolerance_reason():
     assert (a, p) == (0.01, 1e-3)
     assert 691.3 < worst < 691.4
     assert functions.GAMMA_PPF.tolerance >= 2 * worst * 2.0**-53
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "p"),
+    [
+        (2.0, 3.0, 0.25),
+        (0.1, 0.1, 1e-20),
+        (0.5, 10.0, 0.999),
+        (2.0, 10.0, 1e-300),  # SciPy returns NaN
+        (1000.0, 0.5, 5e-324),  # SciPy returns 0.375
+        (100.0, 10.0, 1e-300),  # SciPy is off by 1.6e-10
+        (1000.0, 10000.0, 0.999),  # SciPy is off by 2.8e-13
+        (10000.0, 10000.0, 0.25),
+        (10000.0, 0.1, 1 - 1e-15),
+        (0.1, 1000.0, 1 - 1e-10),
+    ],
+)
+def test_betaincinv_inverts_the_series(a, b, p):
+    # I_x(a, b) = p at the quantile, with I from the positive-term series
+    # (_mp_betainc), not the continued fraction the quantile search uses; in
+    # the upper half 1 - I = 1 - p, with 1 - I from the mirrored series so
+    # that it keeps its relative precision. 250 digits so that 1 - x is
+    # accurate even where it is about 1e-150 (b = 0.1 in the upper tail).
+    with mpmath.workdps(250):
+        a, b, p = mp(a, b, p)
+        x = functions._mp_betaincinv(a, b, p)
+        assert 0 < x < 1
+        if p <= 0.5:
+            assert close(functions._mp_betainc(a, b, x), p, digits=35)
+        else:
+            assert close(functions._mp_betainc(b, a, 1 - x), 1 - p, digits=35)
+
+
+@pytest.mark.parametrize("p", [1e-300, 1e-10, 0.25, 0.5, 0.75, 1 - 1e-15])
+def test_betaincinv_matches_closed_forms(p):
+    # b = 1: I = x^a, x = p^(1/a); a = 1: I = 1 - (1 - x)^b, x = 1 - (1 - p)^(1/b);
+    # a = b = 1/2: I = (2/pi) asin(sqrt x), x = sin(pi p / 2)^2.
+    with mpmath.workdps(60):
+        (p,) = mp(p)
+        three, half = mpmath.mpf(3), mpmath.mpf(1) / 2
+        inv = functions._mp_betaincinv
+        assert close(inv(three, mpmath.mpf(1), p), p ** (1 / three), digits=50)
+        assert close(inv(mpmath.mpf(1), three, p), -mpmath.expm1(mpmath.log1p(-p) / 3), digits=50)
+        assert close(inv(half, half, p), mpmath.sin(mpmath.pi * p / 2) ** 2, digits=50)
+
+
+def test_betaincinv_ends_of_the_support_are_not_poles():
+    # p = 0 and p = 1 give the ends of the support, 0 and 1: finite, so untagged.
+    assert functions._mp_betaincinv(mpmath.mpf(2), mpmath.mpf(3), mpmath.mpf(0)) == 0
+    assert functions._mp_betaincinv(mpmath.mpf(2), mpmath.mpf(3), mpmath.mpf(1)) == 1
+    assert functions.BETAINCINV.input_tags(2.0, 3.0, 0.0) == []
+    assert functions.BETAINCINV.input_tags(2.0, 3.0, 1.0) == []
+
+
+def test_betaincinv_log_magnitude_matches_the_tolerance_reason():
+    # The largest |log x| at a nonzero, normal quantile below 1 in the committed
+    # data (a = 1, b = 1e4, p = 1e-300, x = 1e-304), against the 2 |L| 2^-53 bound.
+    data = Path(__file__).resolve().parent.parent / "data" / "betaincinv.jsonl"
+    rows = [json.loads(line) for line in data.read_text().splitlines()[1:]]
+    logs = [
+        (abs(math.log(y)), r["in"]["a"][0], r["in"]["b"][0], r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags")
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= y < 1
+    ]
+    worst, a, b, p = max(logs)
+    assert (a, b, p) == (1.0, 1e4, 1e-300)
+    assert 699.9 < worst < 700.0
+    assert functions.BETAINCINV.tolerance >= 2 * worst * 2.0**-53

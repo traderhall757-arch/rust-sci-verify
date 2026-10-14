@@ -158,7 +158,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 6: gamma and chi-squared distributions** (statrs
   `Gamma`, `ChiSquared`;
-  [PR #18](https://github.com/traderhall757-arch/rust-sci-verify/pull/18), open):
+  [PR #18](https://github.com/traderhall757-arch/rust-sci-verify/pull/18), merged):
   - Datasets `gamma_cdf` and `gamma_sf` (538 points each: 16 shapes from 0.01
     to 1e6 x x from 0 to 1e300 plus a + k sqrt(a); tolerance 1e-12, the
     `gammainc` tolerance, since with rate 1 this is P(a, x)) and `gamma_ppf`
@@ -186,20 +186,55 @@ _Updated at the end of every session. Start here._
     unconverged iterate), plus finding 012's errors. No hangs; the checks
     still use `run_with_time_limit` and run before `t_ppf`.
 
+- **Milestone 4, part 7: the `special` crate, incomplete beta** (special
+  0.14.2 `Beta::inc_beta`, `Beta::inv_inc_beta`;
+  [PR #19](https://github.com/traderhall757-arch/rust-sci-verify/pull/19), open):
+  - special is MIT OR Apache-2.0. It exports `Beta` (inc_beta, inv_inc_beta,
+    ln_beta), `Gamma` (gamma, digamma, trigamma, inc_gamma, ln_gamma), and
+    with default features `Elliptic` and `LambertW`. Its default build is
+    `no_std`: `ln`, `exp`, `lgamma`, `tgamma` come from the libm crate. New
+    crate `check-special` pins `special = "=0.14.2"` with default features.
+  - New dataset `betaincinv` (1620 points: the betainc a, b x 20 p from 0 to
+    1, including 5e-324 and the doubles nearest 1 - 1e-15; 2e-13 from the
+    largest |log x| 700.0, tested). Reference: Newton on log I in
+    s = log(x / (1 - x)) with the continued fraction, tested against the
+    series and closed forms for b = 1, a = 1, a = b = 1/2. p = 0 and 1 give
+    the support's ends (untagged). One point (a = 1, b = 2, p = 5e-324) is an
+    exact rounding tie and is `unstable-reference`. SciPy fails 105 points
+    (NaN, 2.2e-308 for underflowing quantiles, up to 911x off at
+    p = 5e-324).
+  - `inc_beta` on the three betainc datasets fails 182 of 969 points (worst
+    4.0e-9): **finding 014** (low), approved by Claude after the checklist.
+    Prefactor from separately rounded logs up to 2.2e6 (139 points), series
+    cut-off too early when terms shrink slowly (12; up to 14.8 million terms,
+    0.13 s per call), rounding over long series (lead, 31). Off the grid:
+    2,362 of 10,000, all with max(a, b) >= 283.8, worst 6.0e-10.
+  - `inv_inc_beta` fails 462 of 1620: **finding 015** (high), approved by
+    Claude after the checklist. p < 1.5e-162: NaN start (p * p underflows),
+    then a `debug_assert!` panic in debug builds (CI) and an **endless
+    loop** in release builds (161 points). 7 more endless loops in the far
+    tails of large parameters (Newton step -inf, no iteration limit).
+    Quantiles below about 4.6e-14 wrong (109 points, up to a factor of
+    1e188: absolute stopping rule, start clamped to 1e-4, Newton in x),
+    16 more off by up to 1.9e-4, 169 small (mostly finding 014's error).
+    Off the grid 1,520 of 3,000 fail, 809 never return. It is the original
+    of statrs's `inv_beta_reg` (finding 011: same causes).
+
 ## Next
 
 1. **Milestone 4, continued** (next session): more distributions and
-   crates, one family per PR. Suggested order: the `special` crate (its
-   `inv_inc_beta` is the source of statrs's `inv_beta_reg`, finding 011;
-   start by reading its licence and which functions it exports), then the
-   remaining statrs continuous distributions that reuse checked code (Beta
-   and FisherSnedecor through `beta_reg`; Exponential, Erlang, InverseGamma
-   through the gamma functions; the generic `inverse_cdf` default that
-   several distributions share is a bisection with a relative 1e-14 test
-   and `sf` in the upper half, but also stops after 100 steps, so check
-   its deep tails early), then statrs hypothesis tests. Optional
-   small follow-up: check the K result of `Inu_Knu` on the `kv` grid (not
-   yet checked; same code path as finding 008).
+   crates, one family per PR. Suggested order: the rest of `special`
+   (`Gamma`: `inc_gamma` on the `gammainc` and `gamma_cdf` data, `gamma`
+   and `ln_gamma` on `gamma`; then digamma/trigamma, which need new
+   datasets), then the remaining statrs continuous distributions that reuse
+   checked code (Beta and FisherSnedecor through `beta_reg`, whose inverse
+   `betaincinv` data now exists; Exponential, Erlang, InverseGamma through
+   the gamma functions; the generic `inverse_cdf` default that several
+   distributions share is a bisection with a relative 1e-14 test and `sf`
+   in the upper half, but also stops after 100 steps, so check its deep
+   tails early), then statrs hypothesis tests. Optional small follow-up:
+   check the K result of `Inu_Knu` on the `kv` grid (not yet checked; same
+   code path as finding 008).
 2. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
@@ -209,7 +244,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 013 likewise.
+  007 to 015 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -249,8 +284,8 @@ _Updated at the end of every session. Start here._
 - `t_ppf` takes about 3 minutes to generate (bisection plus Newton on the
   continued fraction, at 50 and 100 digits) and `t_cdf` + `t_sf` about
   7 s; `gamma_ppf` about 5.5 minutes (2 of them at a = 1e6) and
-  `gamma_cdf` + `gamma_sf` about 10 s; a full regeneration now takes about
-  12 minutes.
+  `gamma_cdf` + `gamma_sf` about 10 s; `betaincinv` about 5.5 minutes; a
+  full regeneration now takes about 18 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);
