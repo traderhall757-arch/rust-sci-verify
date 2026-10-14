@@ -188,7 +188,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 7: the `special` crate, incomplete beta** (special
   0.14.2 `Beta::inc_beta`, `Beta::inv_inc_beta`;
-  [PR #19](https://github.com/traderhall757-arch/rust-sci-verify/pull/19), open):
+  [PR #19](https://github.com/traderhall757-arch/rust-sci-verify/pull/19), merged):
   - special is MIT OR Apache-2.0. It exports `Beta` (inc_beta, inv_inc_beta,
     ln_beta), `Gamma` (gamma, digamma, trigamma, inc_gamma, ln_gamma), and
     with default features `Elliptic` and `LambertW`. Its default build is
@@ -220,21 +220,42 @@ _Updated at the end of every session. Start here._
     Off the grid 1,520 of 3,000 fail, 809 never return. It is the original
     of statrs's `inv_beta_reg` (finding 011: same causes).
 
+- **Milestone 4, part 8: the `special` crate, gamma family** (special
+  0.14.2 `Gamma::gamma`, `ln_gamma`, `inc_gamma`;
+  [PR #20](https://github.com/traderhall757-arch/rust-sci-verify/pull/20), open):
+  - New datasets `gammaln` (956 points: the `gamma` grid, decades to 1e300,
+    the overflow edge near 2.55e305, 1 +- d and 2 +- d for d = 1e-5..1e-15,
+    large negative non-integers; 2e-13 from the reflection formula's
+    cancellation, 664x at x = -2.75; tested), `gammasgn` (its sign, the
+    `gammaln` grid without poles, tolerance 0) and `gammainc_large` (P(a, x)
+    for a = 1e8..1e20, 51 points, 1e-12; tested against numerical
+    integration). SciPy is wrong next to 1 and 2 for `gammaln` (up to 29%)
+    and in the lower tail of `gammainc_large` (up to 53%).
+  - `gamma` (libm `tgamma`), `ln_gamma` and its sign (libm `lgamma_r`)
+    pass every point.
+  - `inc_gamma` fails 46 of 781 points: **finding 016** (high), approved by
+    Claude after the checklist. It returns exactly 1 for every x > 1e8
+    (AS 239's shortcut, kept after special removed the p > 1000 branch that
+    preceded it), so it is wrong for every shape above about 1e8; digits
+    lost for large shape (log prefix from rounded terms; from a = 800 off
+    the grid, 1.2e-9 at 1e6, 2.0e-7 at 1e8); subnormal results flushed to 0.
+    All three causes confirmed with a switchable copy.
+
 ## Next
 
 1. **Milestone 4, continued** (next session): more distributions and
-   crates, one family per PR. Suggested order: the rest of `special`
-   (`Gamma`: `inc_gamma` on the `gammainc` and `gamma_cdf` data, `gamma`
-   and `ln_gamma` on `gamma`; then digamma/trigamma, which need new
-   datasets), then the remaining statrs continuous distributions that reuse
-   checked code (Beta and FisherSnedecor through `beta_reg`, whose inverse
-   `betaincinv` data now exists; Exponential, Erlang, InverseGamma through
-   the gamma functions; the generic `inverse_cdf` default that several
-   distributions share is a bisection with a relative 1e-14 test and `sf`
-   in the upper half, but also stops after 100 steps, so check its deep
-   tails early), then statrs hypothesis tests. Optional small follow-up:
-   check the K result of `Inu_Knu` on the `kv` grid (not yet checked; same
-   code path as finding 008).
+   crates, one family per PR. Suggested order: `special`'s digamma and
+   trigamma (need new datasets `digamma`, `trigamma`; mpmath `psi`), then
+   the remaining statrs continuous distributions that reuse checked code
+   (Beta and FisherSnedecor through `beta_reg`, whose inverse `betaincinv`
+   data now exists; Exponential, Erlang, InverseGamma through the gamma
+   functions; the generic `inverse_cdf` default that several distributions
+   share is a bisection with a relative 1e-14 test and `sf` in the upper
+   half, but also stops after 100 steps, so check its deep tails early),
+   then statrs hypothesis tests. `gammaln` and `gammainc_large` can also be
+   run on statrs `ln_gamma` and `gamma_lr` and puruspe `ln_gamma` and `gammp`
+   (small follow-up). Optional: check the K result of `Inu_Knu` on the `kv`
+   grid (same code path as finding 008).
 2. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
@@ -244,7 +265,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 015 likewise.
+  007 to 016 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -284,8 +305,9 @@ _Updated at the end of every session. Start here._
 - `t_ppf` takes about 3 minutes to generate (bisection plus Newton on the
   continued fraction, at 50 and 100 digits) and `t_cdf` + `t_sf` about
   7 s; `gamma_ppf` about 5.5 minutes (2 of them at a = 1e6) and
-  `gamma_cdf` + `gamma_sf` about 10 s; `betaincinv` about 5.5 minutes; a
-  full regeneration now takes about 18 minutes.
+  `gamma_cdf` + `gamma_sf` about 10 s; `betaincinv` about 5.5 minutes;
+  `gammainc_large` about 1.5 minutes, `gammaln` and `gammasgn` about 2 s;
+  a full regeneration now takes about 20 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);
