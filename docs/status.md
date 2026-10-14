@@ -44,8 +44,8 @@ _Updated at the end of every session. Start here._
     (`test_workspace = true`); 22 equivalent mutants in the copied upstream
     code are excluded with reasons in `.cargo/mutants.toml`.
 
-- **Milestone 3 follow-up** (revise fix 3; this branch, PR to be merged by
-  the owner): a 20,000-point random check (SciPy, then mpmath for every
+- **Milestone 3 follow-up** (revise fix 3;
+  [PR #10](https://github.com/traderhall757-arch/rust-sci-verify/pull/10), open): a 20,000-point random check (SciPy, then mpmath for every
   difference above 1e-9) showed that puruspe 0.4.4's switch between its two
   continued fractions also gives **wrong answers at ordinary parameters**
   (a or b <= 3000): up to a factor of 1e37 when 1/a + 1/b < 1, up to 80% for
