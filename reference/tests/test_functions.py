@@ -250,6 +250,92 @@ def test_jv_condition_numbers_match_the_tolerance_reasons(spec, grid, bound):
     assert spec.tolerance >= 2 * worst * 2.0**-53
 
 
+def test_iv_matches_power_series():
+    # I_nu(x) = (x/2)^nu sum_k (x^2/4)^k / (k! Gamma(nu+k+1)) (DLMF 10.25.2), all terms
+    # positive; integer and non-integer orders from both grids.
+    cases = [(0, 20.0), (1, 10.0), (5, 0.1), (100, 20.0), (500, 20.0), (500, 1e-10)]
+    cases += [(0.25, 1e-5), (2.7, 5.0), (100.5, 0.1), (200.75, 20.0)]
+    for nu, x in cases:
+        with mpmath.workdps(80):
+            xm, num = mpmath.mpf(x), mpmath.mpf(nu)
+            q, term, k, total = xm**2 / 4, 1 / mpmath.gamma(num + 1), 0, mpmath.mpf(0)
+            while term > total * mpmath.mpf(10) ** -70:
+                total += term
+                k += 1
+                term *= q / (k * (num + k))
+            series = (xm / 2) ** num * total
+        with mpmath.workdps(50):
+            assert close(mpmath.besseli(nu, mpmath.mpf(x)), series, digits=40), (nu, x)
+
+
+@pytest.mark.parametrize("x", [1e-5, 0.1, 2.0, 700.0])
+def test_iv_half_integer_orders_match_closed_forms(x):
+    # I_{1/2}(x) = sqrt(2/(pi x)) sinh x and I_{3/2}(x) = sqrt(2/(pi x)) (cosh x - sinh x / x)
+    # (DLMF 10.49.8 with 10.47.7), both on the iv_nonint grid.
+    with mpmath.workdps(60):
+        x = mpmath.mpf(x)
+        r = mpmath.sqrt(2 / (mpmath.pi * x))
+        assert close(mpmath.besseli(0.5, x), r * mpmath.sinh(x))
+        assert close(mpmath.besseli(1.5, x), r * (mpmath.cosh(x) - mpmath.sinh(x) / x))
+
+
+@pytest.mark.parametrize("x", [1e-3, 1.0, 20.0, 700.0])
+def test_iv_satisfies_the_wronskian(x):
+    # I_nu(x) K_{nu+1}(x) + I_{nu+1}(x) K_nu(x) = 1/x (DLMF 10.28.2), for the integer and
+    # non-integer orders of the grids; checks besseli against besselk.
+    with mpmath.workdps(60):
+        x = mpmath.mpf(x)
+        for nu in (0, 1, 5, 50, 500, 0.25, 2.7, 200.75):
+            w = mpmath.besseli(nu, x) * mpmath.besselk(nu + 1, x)
+            w += mpmath.besseli(nu + 1, x) * mpmath.besselk(nu, x)
+            assert close(w, 1 / x, digits=40), nu
+
+
+@pytest.mark.parametrize("nu", [0, 1, 100, 200.75])
+def test_iv_matches_large_x_expansion(nu):
+    # I_nu(x) ~ e^x / sqrt(2 pi x) sum_k (-1)^k a_k / x^k (DLMF 10.40.1), with a_k as for
+    # J and Y. The exponentially small part this leaves out is about e^-2x = 1e-869
+    # relative to the result at x = 1e3.
+    with mpmath.workdps(60):
+        x = mpmath.mpf(1000)
+        mu = 4 * mpmath.mpf(nu) ** 2
+        total, term, k = mpmath.mpf(0), mpmath.mpf(1), 0
+        while abs(term) > mpmath.mpf(10) ** -55:
+            total += term
+            k += 1
+            term *= -(mu - (2 * k - 1) ** 2) / (k * 8 * x)
+        expansion = mpmath.exp(x) / mpmath.sqrt(2 * mpmath.pi * x) * total
+        assert close(mpmath.besseli(nu, x), expansion, digits=40)
+
+
+@pytest.mark.parametrize(
+    "spec, grid, bound",
+    [
+        (functions.IV, functions._yv_grid, 201),
+        (functions.IV_LARGE, functions._iv_large_grid, 877),
+        (functions.IV_NONINT, functions._iv_nonint_grid, 728),
+    ],
+)
+def test_iv_condition_numbers_match_the_tolerance_reasons(spec, grid, bound):
+    # As for jv: the largest |x I'/I| at a normal, finite point of the grid.
+    with mpmath.workdps(30):
+        worst = max(
+            functions.iv_condition(nu, x)
+            for nu, x in grid()
+            if mpmath.mpf(2) ** -1022 <= mpmath.besseli(nu, x) < mpmath.mpf(2) ** 1024
+        )
+    assert bound * 0.97 < worst <= bound
+    assert spec.tolerance >= 2 * worst * 2.0**-53
+
+
+def test_iv_large_overflows_where_the_grid_description_says():
+    with mpmath.workdps(30):
+        over = {(nu, x) for nu, x in functions._iv_large_grid() if mpmath.besseli(nu, x) >= 2**1024}
+    expected = {(nu, 720.0) for nu in (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)}
+    expected |= {(nu, 1000.0) for nu in functions._YV_NU}
+    assert over == expected
+
+
 def test_grids_have_no_duplicates():
     for spec in functions.ALL:
         grid = list(spec.grid())

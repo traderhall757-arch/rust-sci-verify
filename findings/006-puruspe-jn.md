@@ -75,7 +75,7 @@ underflow point above and is bit-identical to puruspe where J_n(x) is
 normal (checked at (100, 5), (200, 20), (500, 200)). A fix would be that
 change, or a correct `ldexp` (return a signed zero or a subnormal on
 underflow). `In` (modified Bessel, integer order) uses the same rescaling
-with the same `ldexp`; it is checked in the next dataset (`iv`).
+with the same `ldexp` and fails the same way: [finding 007](007-puruspe-in.md).
 
 Random check (scratch script, not committed, rule 6): 3,000 points with
 n uniform on 2..1000 and x = 10^U(-10, 3.5) (Python `random.seed(20261014)`,
