@@ -110,13 +110,32 @@ _Updated at the end of every session. Start here._
     has the same code) and from cancellation at small x for negative
     fractional order.
 
+- **Milestone 4, part 4: standard normal distribution** (statrs `Normal`;
+  PR link in the next section once opened):
+  - Datasets `norm_cdf` and `norm_sf` (441 points each: x = -40..40 step 0.25
+    plus decades, tolerance 4e-13 from the condition number |x phi/Phi|,
+    which reaches 1408 at x = -37.5; tested) and `norm_ppf` (138 points, both
+    tails, the bulk, 1/2 +- 10^-k; p = 0 and 1 tagged `pole`; 1e-13). The
+    quantile reference is Newton's method on log Phi, tested against
+    `sqrt(2) erfinv(2p - 1)` and Phi(ppf(p)) = p. SciPy flushes subnormal
+    cdf values at x = -37.75 and -38 to 0 ("SciPy wrong").
+  - `Normal::inverse_cdf` passes every point (worst 2.6e-16).
+  - `Normal::cdf` and `Normal::sf` fail 155 points each (up to 1.03e-10):
+    **finding 009** (low), approved by Claude after the checklist. Root cause
+    is statrs's `erfc` (finding 004), now **confirmed**: rounding its 13
+    interval constants to float, as Boost does, makes `erfc`, `cdf` and `sf`
+    pass every grid point and a 20,000-point random scan.
+  - Only mean 0, sd 1 is checked; other parameters use the same `erfc` call.
+
 ## Next
 
-1. **Milestone 4, continued** (next session): the rest of Milestone 4 per
-   the roadmap: statrs distributions (CDF/PPF/SF vs `scipy.stats`), the
-   `special` crate, then statrs hypothesis tests. Pick one function family
-   per PR. Optional small follow-up: check the K result of `Inu_Knu` on the
-   `kv` grid (not yet checked; same code path as finding 008).
+1. **Milestone 4, continued** (next session): more statrs distributions
+   (CDF/SF/PPF vs `scipy.stats`), one family per PR. Suggested order:
+   Student's t, chi-squared and gamma (they exercise statrs's incomplete
+   gamma and beta, so expect overlap with findings 001 to 003 style issues),
+   then the `special` crate, then statrs hypothesis tests. Optional small
+   follow-up: check the K result of `Inu_Knu` on the `kv` grid (not yet
+   checked; same code path as finding 008).
 2. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
@@ -126,7 +145,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 and 008 likewise.
+  007, 008 and 009 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -163,7 +182,7 @@ _Updated at the end of every session. Start here._
 - Under the error metric, a subnormal result flushed to zero is wrong (relative
   to the smallest normal double). SciPy does this for erfc(26.75), erfc(27.0)
   and gammainc(200, 2).
-- `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s. The `yv` grids leave out
+- `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);
   `betainc_switch` about 30 s. Its grid leaves out a = 1e5 with x = 1 - 1e-4,
