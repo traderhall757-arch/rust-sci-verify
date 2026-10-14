@@ -42,7 +42,7 @@ The true values come from `mpmath.erfc` (and, for x >= 1e6, the asymptotic
 series of erfcx), tested against erfc(x) = Gamma(1/2, x^2)/sqrt(pi) (DLMF 7.11.2)
 in `reference/tests/test_functions.py`.
 
-Root cause (strong evidence, not yet tested with a fix): `erf_impl` follows
+Root cause (confirmed with a fix, see below): `erf_impl` follows
 Boost's `erf_imp` for 53-bit precision, which writes each interval's result as
 exp(-z^2)/z * (Y + R(z)) with R a minimax rational fit made against Y **as a
 float**: Boost declares e.g. `Y = 0.3440242112F`, which is
@@ -52,3 +52,8 @@ float**: Boost declares e.g. `Y = 0.3440242112F`, which is
 constants in `erf_impl` (`0.3440242112` to `0.5641584396`) differ from their
 float values by 5e-12 to 4.3e-11 in the same way. Using the float-rounded values
 (for example `0.3440242112_f32 as f64`) would likely fix it.
+
+Confirmed (2026-10-14, while diagnosing [finding 009](009-statrs-normal.md)):
+a copy of statrs 0.19.1 with all 13 constants replaced by `<constant>_f32 as f64`
+passes all 281 points of `erfc.jsonl` (worst 3.8e-16, tolerance 1e-13).
+statrs's `Normal::cdf` and `Normal::sf` inherit this error (finding 009).
