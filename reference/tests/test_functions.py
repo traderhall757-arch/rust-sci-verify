@@ -5,6 +5,8 @@ dataset's mpmath function is compared here with a different method (an exact
 identity, a finite sum, or a different mpmath function) where both are valid.
 """
 
+import math
+
 import mpmath
 import pytest
 
@@ -94,6 +96,20 @@ def test_betainc_series_matches_mpmath_betainc(a, b, x):
         a, b, x = mp(a, b, x)
         exact = mpmath.betainc(a, b, 0, x, regularized=True)
         assert close(functions._mp_betainc(a, b, x), exact)
+
+
+def test_kv_matches_upward_recurrence():
+    # K_{n+1}(x) = K_{n-1}(x) + (2n/x) K_n(x) (DLMF 10.29.1), stable upwards,
+    # started from K_0 and K_1. Checks the pilot point K_100(0.0631).
+    with mpmath.workdps(80):
+        x = mpmath.mpf(0.0631)
+        prev, cur = mpmath.besselk(0, x), mpmath.besselk(1, x)
+        for n in range(1, 100):
+            prev, cur = cur, prev + 2 * n / x * cur
+    with mpmath.workdps(50):
+        value = mpmath.besselk(100, mpmath.mpf(0.0631))
+        assert close(value, cur, digits=35)
+        assert math.isfinite(float(value)) and float(value) > 5e305
 
 
 def test_grids_have_no_duplicates():

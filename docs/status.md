@@ -22,15 +22,15 @@ this order:
   1. **erfc** (merged): statrs `erfc` (finding 004, low: about 10 digits; 111 of 281 points); new `check-statrs` crate; harness `Expected` lists all points of a finding.
   2. **gamma** (merged): statrs `gamma` (finding 003, high: finite at poles, early overflow; 187 of 901 points).
   3. **gammainc** (merged): puruspe `gammp` (finding 002, medium: NaN for a >= 100; 78 of 192 points); tolerance 1e-12.
-  4. **betainc** (this PR): puruspe `betai` (finding 001, high: 0 instead of 0.5 at a = b = 1e4; 336 of 639 points); tolerance 1e-12.
-  5. **kv** (to do): puruspe `Kn` vs the SciPy false alarm K_100(0.0631) = inf (SciPy wrong, crate right); no finding.
+  4. **betainc** (merged): puruspe `betai` (finding 001, high: 0 instead of 0.5 at a = b = 1e4; 336 of 639 points); tolerance 1e-12.
+  5. **kv** (this PR): puruspe `Kn` vs the SciPy false alarm K_100(0.0631) = inf (SciPy wrong, crate right); no finding.
 
 All four findings are **approved by owner** (2026-10-14); none is reported
 upstream (that needs a separate approval per report).
 
 ## Next
 
-1. Owner merges the open Milestone 2 PR; Claude then opens the next one in the list.
+1. Owner merges the last Milestone 2 PR.
 2. Owner sets up the `main` ruleset requiring the CI checks (if not done yet).
 3. **Milestone 3** in a fresh session: diagnose `puruspe::betai` (root cause and a
    minimal, tested, fork-ready fix; not submitted). Leads are in finding 001.
