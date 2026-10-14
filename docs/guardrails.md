@@ -13,6 +13,7 @@ pull request. Each one is listed with how it works and why.
 | 6 | Every public function has a reference test | `guardrails` | `scripts/check_api_tests.py`; see below. |
 | 7 | No unused dependencies | `guardrails` | `cargo machete`. |
 | 8 | Pinned versions | `guardrails` | `scripts/check_pins.py`: exact toolchain in `rust-toolchain.toml`; `Cargo.lock` and `reference/uv.lock` committed; Python deps `==`; target crates `=x.y.z`; CI tools `@version`. |
+| 9 | A tested fix is the patch offered upstream | `guardrails` | `scripts/check_fixes.py --run-tests`: applies each `fixes/` patch to the pinned upstream source, checks that the items listed under `[package.metadata.rsv.fix]` in the fix crate equal the patched ones character for character, and runs the patched crate's own tests. See `fixes/README.md`. |
 
 The guardrail scripts have their own tests (`scripts/tests/`), run in the
 `guardrails` job.
@@ -29,6 +30,9 @@ fails on it ("caught"). Mutants that do not compile ("unviable") are ignored.
   `guardrails` job checks that every exclusion has a reason, and every change
   to the file is a "Checks changed" item.
 - **Weekly full run:** fails if the score over all code is below 95%.
+- **Which tests run:** every mutant runs the whole workspace's tests
+  (`test_workspace = true`), because implementation crates such as
+  `puruspe-fix` are tested by the reference checks in the check crates.
 
 A fixed percentage is not used for pull requests because they are small: one
 survivor out of five mutants would already be 80%.

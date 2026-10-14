@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 15:48:20 +0000
+Subject: [PATCH] Fix betai for large a and b
+
+Three independent bugs made `betai` return wrong values:
+
+1. `betaiapprox` (Gauss-Legendre branch, a and b > 3000): the integrand
+   was `b1 * (1 - t).ln() - lnmuc` instead of `b1 * ((1 - t).ln() - lnmuc)`.
+   The exponent is then too small by (b1 - 1) * ln(1 / (1 - mu)),
+   about 6900 at a = b = 1e4, so the integrand underflows to 0 and the
+   result is 0 (or -0, see 2). Example:
+   betai(1e4, 1e4, 0.5) returned 0 (true value 0.5).
+
+2. `betaiapprox` chose between `1 - ans` and `-ans` by the sign of `ans`.
+   When the tail integral underflows to +0 for x above the mean, the
+   result was -0 instead of 1. The branch is now chosen by `x > mu`,
+   which is what the sign stood for. Example: betai(1e4, 1e4, 0.7)
+   returned -0 (true value 1 to double precision).
+
+3. `betai` switched between the continued fraction for I_x(a, b) and for
+   1 - I_(1-x)(b, a) at x = (a + 1) / (a + 2b) instead of
+   (a + 1) / (a + b + 2), the point below which the continued fraction
+   converges rapidly (Numerical Recipes, 3rd ed., section 6.4). Between
+   the two it was evaluated where it is numerically unstable. Example:
+   betai(1e4, 1e3, 0.9) was 3.1% low.
+
+   Trade-off: for small b and x close to 1 the result now comes from
+   1 - (...) and loses accuracy when it is small; the worst case we
+   found is betai(100, 0.1, 0.99), from 1.3e-11 to 5.1e-10 relative
+   error. That is within the error `ln_gamma` already
+   causes elsewhere (up to 5.7e-10 before this change).
+
+Expected values are from mpmath at 50 and 100 significant digits. The
+new test fails before this change and passes after it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/beta.rs        |  6 +++---
+ tests/beta_test.rs | 24 ++++++++++++++++++++++++
+ 2 files changed, 27 insertions(+), 3 deletions(-)
+
+diff --git a/src/beta.rs b/src/beta.rs
+index aec936a..8ea5fb6 100644
+--- a/src/beta.rs
++++ b/src/beta.rs
+@@ -70,7 +70,7 @@ pub fn betai(a: f64, b: f64, x: f64) -> f64 {
+         return betaiapprox(a, b, x);
+     }
+     let bt = (ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + a * x.ln() + b * (1f64 - x).ln()).exp();
+-    if x < (a + 1f64) / (a + b * 2f64) {
++    if x < (a + 1f64) / (a + b + 2f64) {
+         bt * betacf(a, b, x) / a
+     } else {
+         1f64 - bt * betacf(b, a, 1f64 - x) / b
+@@ -144,12 +144,12 @@ fn betaiapprox(a: f64, b: f64, x: f64) -> f64 {
+     let mut sum = 0f64;
+     for j in 0..18 {
+         t = x + (xu - x) * Y[j];
+-        sum += W[j] * (a1 * (t.ln() - lnmu) + b1 * (1f64 - t).ln() - lnmuc).exp();
++        sum += W[j] * (a1 * (t.ln() - lnmu) + b1 * ((1f64 - t).ln() - lnmuc)).exp();
+     }
+     let ans = sum
+         * (xu - x)
+         * (a1 * lnmu - ln_gamma(a) + b1 * lnmuc - ln_gamma(b) + ln_gamma(a + b)).exp();
+-    if ans > 0f64 {
++    if x > mu {
+         1f64 - ans
+     } else {
+         -ans
+diff --git a/tests/beta_test.rs b/tests/beta_test.rs
+index adb1377..5b75d9a 100644
+--- a/tests/beta_test.rs
++++ b/tests/beta_test.rs
+@@ -21,6 +21,18 @@ fn test_betai() {
+     }
+ }
+ 
++#[test]
++fn test_betai_large_parameters() {
++    // Regression test: these inputs returned 0, -0 or a value 3% too low.
++    // Expected values from mpmath at 50 and 100 digits. The tolerance is
++    // looser than in `test_betai`: the prefactor, computed from differences
++    // of `ln_gamma` values, limits the accuracy to about 6e-10 here.
++    for &(a, b, x, expected) in BETAI_LARGE_TABLE.iter() {
++        let result = betai(a, b, x);
++        assert_relative_eq!(result, expected, epsilon = 0f64, max_relative = 1e-9);
++    }
++}
++
+ #[test]
+ fn test_invbetai() {
+     for &(a, b, p, expected) in INVBETAI_TABLE.iter() {
+@@ -578,3 +590,15 @@ const INVBETAI_TABLE: [(f64, f64, f64, f64); 49] = [
+         7.46046920485483e-01,
+     ),
+ ];
++
++const BETAI_LARGE_TABLE: [(f64, f64, f64, f64); 7] = [
++    // Gauss-Legendre branch (a, b > 3000): centre and both tails.
++    (1e4, 1e4, 0.5, 0.5),
++    (1e4, 1e4, 0.7, 1.0),
++    (3001.0, 3001.0, 0.4354664089448028, 5.0440856660254465e-24),
++    (5000.0, 2e4, 0.20252977153321, 0.841343524310709),
++    // Continued-fraction branch, near the switch point.
++    (1e4, 1e3, 0.9, 6.15295567297501e-4),
++    (1e4, 0.1, 0.99, 3.713540930257269e-47),
++    (1e4, 0.1, 0.9999900000999989, 0.17245201791471385),
++];

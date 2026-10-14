@@ -22,15 +22,39 @@ _Updated at the end of every session. Start here._
 
   All four findings are **approved by owner** (2026-10-14); none is reported
   upstream (that needs a separate approval per report).
+- **Milestone 2 complete** ([PR #7](https://github.com/traderhall757-arch/rust-sci-verify/pull/7), merged).
+- **Milestone 3** (diagnose `puruspe::betai`; [PR #8](https://github.com/traderhall757-arch/rust-sci-verify/pull/8), open): root cause in
+  [finding 001](../findings/001-puruspe-betai.md). Three bugs cause the wrong
+  answers: missing parentheses in the quadrature integrand (every input with
+  a, b > 3000 gives 0 or -0), a branch chosen by the sign of an underflowed
+  value (-0 instead of 1), and a mistyped continued-fraction switch point
+  (3% error at (1e4, 1e3, 0.9)). A fourth issue, the prefactor built from
+  puruspe's 7-term `ln_gamma`, causes the 1e-11 to 6e-10 accuracy loss and is
+  not fixed. New:
+  - `fixes/puruspe/0001-Fix-betai-for-large-a-and-b.patch`: three-line fix plus a
+    regression test, against puruspe 0.4.4 (= upstream `main`). **Not submitted.**
+  - `crates/puruspe-fix`: verbatim copy of the patched code, checked as
+    `puruspe_fix::betai`: no wrong answers left; worst error 5.15e-10 (CI bound
+    6e-10). Report `reports/puruspe-fix-0.1.0.md`.
+  - Dataset `betainc_large` (144 points, a, b in 3001..1e5): puruspe 0.4.4 is
+    wrong at all of them.
+  - Guardrail 9, `scripts/check_fixes.py`: the fix crate must equal the patch,
+    and the patched crate's own tests must pass (CI `guardrails` job).
+  - Mutation testing now runs the whole workspace's tests per mutant
+    (`test_workspace = true`); 22 equivalent mutants in the copied upstream
+    code are excluded with reasons in `.cargo/mutants.toml`.
 
 ## Next
 
-1. Owner merges the last Milestone 2 PR (kv). Milestone 2 is then complete; start a fresh session.
-2. Owner sets up the `main` ruleset requiring the CI checks (if not done yet).
-3. **Milestone 3** in a fresh session: diagnose `puruspe::betai` (root cause and a
-   minimal, tested, fork-ready fix; not submitted). Leads are in finding 001.
-4. Milestone 4 adds `yv` (puruspe Bessel functions over wider ranges), with its
-   own dataset and checks (owner: fine as long as it is tested).
+1. Owner reviews and merges the Milestone 3 PR ([PR #8](https://github.com/traderhall757-arch/rust-sci-verify/pull/8)).
+2. Submit the puruspe patch (approved). This session cannot reach
+   `Axect/puruspe`: the owner forks it on GitHub and adds the fork to a session
+   (or submits it with `git am` + `--reset-author`, see `fixes/README.md`).
+   Then record the link in finding 001 and set its status to "reported".
+3. Owner sets up the `main` ruleset requiring the CI checks (if not done yet).
+4. **Milestone 4** in a fresh session: expand coverage, starting with `yv`
+   (puruspe Bessel functions over wider ranges), with its own dataset and
+   checks (owner: fine as long as it is tested).
 
 ## Decisions recorded (owner, 2026-10-14)
 
@@ -39,6 +63,11 @@ _Updated at the end of every session. Start here._
   **revisit later** (owner's note), e.g. once a Boost/Temme-quality
   implementation shows what is achievable.
 - Milestone 2 split into one PR per function family.
+- Finding 001's extended scope (all a, b > 3000) confirmed.
+- Submitting `fixes/puruspe/0001-Fix-betai-for-large-a-and-b.patch` to puruspe
+  approved (this one patch only; any later report or patch needs its own approval).
+- The `betai` accuracy floor (Boost-style prefactor, better `ln_gamma`; also
+  helps `gammp`) becomes a later milestone, after Milestone 4.
 
 ## Known problems / notes
 
@@ -52,5 +81,8 @@ _Updated at the end of every session. Start here._
 - Under the error metric, a subnormal result flushed to zero is wrong (relative
   to the smallest normal double). SciPy does this for erfc(26.75), erfc(27.0)
   and gammainc(200, 2).
+- `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5).
+- Upstream puruspe `main` fails its own `cargo fmt --check` and `cargo clippy`
+  on Rust 1.97, independently of our patch (`fixes/README.md`).
 - The weekly job has been dry-run locally; its first real run is the first
   Monday after merge, or run it by hand from the Actions tab.

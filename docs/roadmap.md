@@ -41,7 +41,9 @@ Milestones:
    Do not submit it.
 4. Expand coverage: statrs distribution CDF/PPF/SF; the `special` crate; puruspe
    Bessel functions over wider ranges; then statrs hypothesis tests vs `scipy.stats`.
-5. Gap map: commonly used SciPy functions without a trustworthy Rust
+5. `betai`/`gammp` accuracy floor (owner, 2026-10-14: after milestone 4): a
+   Boost-style prefactor and a better `ln_gamma`, as a second puruspe patch.
+6. Gap map: commonly used SciPy functions without a trustworthy Rust
    implementation. Feeds Phases B and C.
 
 Phase A keeps running on schedule after B and C start.

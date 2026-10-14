@@ -1,0 +1,26 @@
+[package]
+name = "puruspe-fix"
+version = "0.1.0"
+description = "puruspe 0.4.4 betai with the fix in fixes/puruspe/, so the harness can verify the fix"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Exact pin: the fix is a patch against this release. Only `ln_gamma` is used.
+puruspe = "=0.4.4"
+
+[package.metadata.rsv]
+# See scripts/check_api_tests.py.
+role = "implementation"
+
+[package.metadata.rsv.fix]
+# See scripts/check_fixes.py: these items must equal the patched upstream source.
+upstream = "puruspe"
+patch = "fixes/puruspe/0001-Fix-betai-for-large-a-and-b.patch"
+items = { "src/beta.rs" = ["betai", "betacf", "betaiapprox", "SWITCH"], "src/lib.rs" = ["EPS", "FPMIN", "Y", "W"] }
+
+[lints]
+workspace = true

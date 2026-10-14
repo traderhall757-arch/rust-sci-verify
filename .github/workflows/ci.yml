@@ -94,6 +94,8 @@ jobs:
         run: python3 scripts/check_pins.py
       - name: Every mutation-testing exclusion has a reason
         run: python3 scripts/mutation_score.py --check-config .cargo/mutants.toml
+      - name: Every fix crate equals its upstream patch, and the patched crate's tests pass
+        run: python3 scripts/check_fixes.py --run-tests
 
   mutants:
     # Rule (docs/guardrails.md): no surviving mutant in changed code, except

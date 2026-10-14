@@ -1,6 +1,7 @@
 """The registry of reference datasets. One entry per mathematical function."""
 
 import itertools
+import math
 
 import mpmath
 import scipy.special as sc
@@ -255,6 +256,49 @@ BETAINC = Spec(
 )
 
 
+# --- betainc_large -----------------------------------------------------------
+
+_BETAINC_LARGE_AB = (3001.0, 5000.0, 20000.0, 100000.0)
+_BETAINC_LARGE_K = (-10, -5, -2, -1, 0, 1, 2, 5, 10)
+
+
+def _betainc_large_grid() -> list[tuple[float, float, float]]:
+    # Both parameters above 3000, where puruspe switches to Gauss-Legendre
+    # quadrature. x = mean + k standard deviations of the beta distribution,
+    # so every row covers both tails (I near 0 and near 1) and the centre.
+    points = set()
+    for a, b in itertools.product(_BETAINC_LARGE_AB, repeat=2):
+        mean = a / (a + b)
+        sd = math.sqrt(a * b / ((a + b) ** 2 * (a + b + 1)))
+        points |= {(a, b, mean + k * sd) for k in _BETAINC_LARGE_K}
+    return sorted(points)
+
+
+BETAINC_LARGE = Spec(
+    name="betainc_large",
+    description=(
+        "Regularized incomplete beta function I_x(a, b) for large a and b "
+        "(same function as betainc)"
+    ),
+    inputs=("a", "b", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "Same reasoning as betainc: the logarithms of the prefix's factors reach "
+        "2.8e5 in magnitude here (a = b = 1e5), so forming them separately in double "
+        "precision loses up to 2.8e5 * 2^-53 (about 3e-11), while combining them before "
+        "rounding does not. 1e-12 is 7x the worst SciPy error on this grid (1.5e-13)"
+    ),
+    grid_description=(
+        "a, b in {3001, 5000, 2e4, 1e5} x x = a/(a+b) + k sd, "
+        "k in {-10, -5, -2, -1, 0, 1, 2, 5, 10}, sd the standard deviation of Beta(a, b)"
+    ),
+    grid=_betainc_large_grid,
+    mpmath_fn=_mp_betainc,
+    scipy_name="scipy.special.betainc",
+    scipy_fn=sc.betainc,
+)
+
+
 # --- kv --------------------------------------------------------------------
 
 _KV_NU = (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0)
@@ -290,4 +334,4 @@ KV = Spec(
     scipy_fn=sc.kv,
 )
 
-ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, KV)
+ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, KV)

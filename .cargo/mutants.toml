@@ -6,4 +6,36 @@
 # explaining why no test can catch it (e.g. the mutant does not change
 # behaviour). scripts/mutation_score.py --check-config enforces the comment.
 # Adding or changing an entry is a "Checks changed" item in the PR.
-exclude_re = []
+# Implementation crates (e.g. puruspe-fix) are verified by reference checks
+# in the check crates, not by their own tests, so every mutant runs the
+# whole workspace's tests (about one second).
+test_workspace = true
+
+exclude_re = [
+  # puruspe-fix is a verbatim copy of upstream code. FPMIN only feeds the
+  # Lentz guards below, so a smaller FPMIN matters only if a guard fires.
+  # reason: equivalent, no input makes a guard fire (next entry).
+  'crates/puruspe-fix/src/lib\.rs:\d+:\d+: replace / with (%|\*)$',
+  # Lentz's guards `if d.abs() < FPMIN` (and c) against division by zero fire
+  # only on exact cancellation (|d| < 1e-292). The first cannot fire: below
+  # the switch point d > 2 / (a + b + 2). No known input makes the others fire.
+  # reason: no reference point can tell `<` from `<=` or `==` in these guards.
+  'crates/puruspe-fix/src/lib\.rs:\d+:\d+: replace < with (==|<=) in betacf$',
+  # `if x == 0 || x == 1 { return x }` is an early exit; with `&&` the general
+  # code runs and returns the same 0 or 1 (ln 0 = -inf makes the prefactor 0).
+  # reason: equivalent, same result for every input.
+  'crates/puruspe-fix/src/lib\.rs:\d+:\d+: replace \|\| with && in betai$',
+  # `a > 3000 && b > 3000` picks quadrature over the continued fraction. Both
+  # are accurate there; `>=` differs only at exactly 3000, `==` always uses
+  # the continued fraction, and only speed changes.
+  # reason: chooses between two methods that give the same verdicts.
+  'crates/puruspe-fix/src/lib\.rs:\d+:\d+: replace > with (==|>=) in betai$',
+  # reason: at x exactly equal to the switch point both continued fractions are valid.
+  'crates/puruspe-fix/src/lib\.rs:\d+:\d+: replace < with <= in betai$',
+  # These move the quadrature's integration limit slightly: the standard
+  # deviation's `a + b + 1` (line 156), or the upper limit for x > mean
+  # (line 161), where the result is 1 - tail and the dropped part of the tail
+  # lies beyond 10 standard deviations (< 1e-20).
+  # reason: the change is invisible in double precision.
+  'crates/puruspe-fix/src/lib\.rs:(156:52|161:41): replace \+ with (-|\*) in betaiapprox$',
+]

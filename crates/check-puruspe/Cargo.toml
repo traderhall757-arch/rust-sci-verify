@@ -13,6 +13,7 @@ harness.workspace = true
 # Exact pin: a new puruspe release is checked by the weekly job first, then
 # adopted here in its own pull request.
 puruspe = "=0.4.4"
+puruspe-fix.workspace = true
 
 [package.metadata.rsv]
 # See scripts/check_api_tests.py.
