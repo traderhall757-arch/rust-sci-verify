@@ -128,7 +128,7 @@ _Updated at the end of every session. Start here._
   - Only mean 0, sd 1 is checked; other parameters use the same `erfc` call.
 
 - **Milestone 4, part 5: Student's t distribution** (statrs `StudentsT`;
-  [PR #17](https://github.com/traderhall757-arch/rust-sci-verify/pull/17), open):
+  [PR #17](https://github.com/traderhall757-arch/rust-sci-verify/pull/17), merged):
   - Datasets `t_cdf` and `t_sf` (1007 points each: 19 df from 0.1 to 1e8 x
     53 x from -1e300 to 1e300) and `t_ppf` (513 points: the same df x 27 p
     from 5e-324 to 1 - 1e-15; p = 0, 1 tagged `pole`, 7 `overflow`). All
@@ -156,17 +156,50 @@ _Updated at the end of every session. Start here._
     result within N s", always crate wrong; `docs/conventions.md`), so an
     endless loop in a crate cannot hang CI. `t_ppf` uses a 5 s limit.
 
+- **Milestone 4, part 6: gamma and chi-squared distributions** (statrs
+  `Gamma`, `ChiSquared`;
+  [PR #18](https://github.com/traderhall757-arch/rust-sci-verify/pull/18), open):
+  - Datasets `gamma_cdf` and `gamma_sf` (538 points each: 16 shapes from 0.01
+    to 1e6 x x from 0 to 1e300 plus a + k sqrt(a); tolerance 1e-12, the
+    `gammainc` tolerance, since with rate 1 this is P(a, x)) and `gamma_ppf`
+    (432 points: same shapes x 27 p; p = 1 tagged `pole`, p = 0 untagged
+    because the quantile is 0; 2e-13 from the largest |log x| 691.3, tested).
+    `mpmath.gammainc` does not converge at a = 1e6, so the reference is the
+    series DLMF 8.7.1 / continued fraction DLMF 8.9.2, tested against
+    `mpmath.gammainc`, the finite sum DLMF 8.4.10 up to a = 1e6, and closed
+    forms. SciPy is wrong at 3 cdf/sf points (2.1e-10 at a = 1e6) and 6 ppf
+    points (p = 5e-324 for a >= 100).
+  - `ChiSquared(k)` is statrs's `Gamma(k/2, 1/2)`, so it is checked on the
+    same data (df = 2a, at 2x, half its quantile): cdf/sf bit-identical to
+    `Gamma`, quantile failing at partly different points.
+  - `cdf`/`sf` fail 22 and 21 points: **finding 012** (low), approved by
+    Claude after the checklist. Digits lost for shape >= about 750 (1.2e-9 on
+    the grid, 3.4e-9 off it): the log prefactor a ln x - x - ln Gamma(a)
+    cancels between terms near 1.3e7 (statrs's `ln_gamma` itself is within
+    about 1 ulp); subnormal results are flushed to 0 by an `ax < -709.78`
+    shortcut.
+  - `inverse_cdf` fails 170 points for each distribution: **finding 013**
+    (high), approved by Claude after the checklist. About 9.3e-10 for every
+    quantile below 1e-9 (the convergence test is effectively absolute 1e-9),
+    0.2% off at p = 1 - 1e-15 (solves cdf = p instead of sf = 1 - p), up to
+    8% off in the far lower tail for large shape (100-step cap returns an
+    unconverged iterate), plus finding 012's errors. No hangs; the checks
+    still use `run_with_time_limit` and run before `t_ppf`.
+
 ## Next
 
-1. **Milestone 4, continued** (next session): more statrs distributions
-   (CDF/SF/PPF vs `scipy.stats`), one family per PR. Suggested order:
-   chi-squared and gamma (statrs's incomplete gamma; expect finding 002/003
-   style issues; the quantiles may share `inv_beta_reg`-like Newton code, so
-   use `run_with_time_limit` from the start), then the `special` crate (its
-   `inv_inc_beta` is the source of statrs's `inv_beta_reg`, finding 011),
-   then statrs hypothesis tests. Optional small
-   follow-up: check the K result of `Inu_Knu` on the `kv` grid (not yet
-   checked; same code path as finding 008).
+1. **Milestone 4, continued** (next session): more distributions and
+   crates, one family per PR. Suggested order: the `special` crate (its
+   `inv_inc_beta` is the source of statrs's `inv_beta_reg`, finding 011;
+   start by reading its licence and which functions it exports), then the
+   remaining statrs continuous distributions that reuse checked code (Beta
+   and FisherSnedecor through `beta_reg`; Exponential, Erlang, InverseGamma
+   through the gamma functions; the generic `inverse_cdf` default that
+   several distributions share is a bisection with a relative 1e-14 test
+   and `sf` in the upper half, but also stops after 100 steps, so check
+   its deep tails early), then statrs hypothesis tests. Optional
+   small follow-up: check the K result of `Inu_Knu` on the `kv` grid (not
+   yet checked; same code path as finding 008).
 2. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
@@ -176,7 +209,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007, 008, 009, 010 and 011 likewise.
+  007 to 013 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -215,7 +248,9 @@ _Updated at the end of every session. Start here._
   and gammainc(200, 2).
 - `t_ppf` takes about 3 minutes to generate (bisection plus Newton on the
   continued fraction, at 50 and 100 digits) and `t_cdf` + `t_sf` about
-  7 s; a full regeneration now takes about 6 minutes.
+  7 s; `gamma_ppf` about 5.5 minutes (2 of them at a = 1e6) and
+  `gamma_cdf` + `gamma_sf` about 10 s; a full regeneration now takes about
+  12 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);
