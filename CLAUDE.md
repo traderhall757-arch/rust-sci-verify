@@ -29,8 +29,11 @@ cargo fmt --all --check
 cargo clippy -q --all-targets --locked -- -D warnings
 cargo test -q --locked                         # also rewrites reports/*.md
 cd reference && uv sync -q --locked && uv run -q python -m rsv_reference   # regenerate data
-cd reference && uv run -q pytest -q && uv run -q ruff check . && uv run -q ruff format --check .
+cd reference && uv run -q pytest -q && uv run -q ruff check . ../scripts && uv run -q ruff format --check . ../scripts
+cd reference && uv run -q pytest -q ../scripts/tests          # guardrail script tests
+python3 scripts/check_orphans.py && python3 scripts/check_api_tests.py && python3 scripts/check_pins.py && cargo machete
 ```
+Guardrails are explained in `docs/guardrails.md`.
 Never print whole data files or CI logs; query data with scripts, tail/grep logs.
 Mutation testing runs in CI; locally only on the single function being fixed.
 
@@ -38,4 +41,5 @@ Mutation testing runs in CI; locally only on the single function being fixed.
 - `crates/harness`: shared library (data loading, classification, reports).
 - `crates/check-<crate>`: one crate per verified target crate (pins its version).
 - `reference/`: pinned Python generator; data in `reference/data/<function>.jsonl`.
-- `reports/`, `findings/`, `docs/` (status, roadmap, conventions, data-format).
+- `scripts/`: guardrails and weekly-job helpers (tested in `scripts/tests/`).
+- `reports/`, `findings/`, `docs/` (status, roadmap, conventions, data-format, guardrails).

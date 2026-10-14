@@ -1,0 +1,95 @@
+name: Weekly verification
+
+# Re-runs the harness against the latest releases of the target crates and of
+# SciPy/NumPy/mpmath, in this runner's working copy only. It never commits or
+# pushes (contents: read) and only opens or updates an issue in this repository.
+
+on:
+  schedule:
+    - cron: "23 6 * * 1" # Mondays 06:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  latest:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - name: Keep the committed reports for comparison
+        run: cp -r reports "$RUNNER_TEMP/committed-reports"
+      - name: Latest target crate releases
+        run: python3 scripts/relax_pins.py && cargo update -q
+      - name: Latest SciPy, NumPy and mpmath; regenerate data
+        working-directory: reference
+        run: |
+          uv sync -q --locked
+          uv pip install -q --upgrade scipy numpy mpmath
+          uv run -q --no-sync python -c 'import scipy, numpy, mpmath; print("scipy", scipy.__version__, "numpy", numpy.__version__, "mpmath", mpmath.__version__)'
+          uv run -q --no-sync python -m rsv_reference
+      - name: Run the checks
+        run: |
+          status=0
+          cargo test -q > "$RUNNER_TEMP/test.log" 2>&1 || status=$?
+          echo "TEST_STATUS=$status" >> "$GITHUB_ENV"
+          tail -n 5 "$RUNNER_TEMP/test.log"
+      - name: Compare with committed results
+        run: |
+          status=0
+          python3 scripts/weekly_compare.py "$RUNNER_TEMP/committed-reports" "$TEST_STATUS" \
+            "$RUNNER_TEMP/test.log" "$RUNNER_TEMP/weekly.md" || status=$?
+          case "$status" in
+            0) echo "CHANGED=false" >> "$GITHUB_ENV" ;;
+            10) echo "CHANGED=true" >> "$GITHUB_ENV"; cat "$RUNNER_TEMP/weekly.md" >> "$GITHUB_STEP_SUMMARY" ;;
+            *) exit "$status" ;;
+          esac
+      - name: Open or update the weekly issue (this repository only)
+        if: env.CHANGED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          repo="$GITHUB_REPOSITORY"
+          echo "" >> "$RUNNER_TEMP/weekly.md"
+          echo "Run: $RUN_URL" >> "$RUNNER_TEMP/weekly.md"
+          gh label create weekly-verification --repo "$repo" --force \
+            --color 1d76db --description "Weekly run on latest releases differs from committed results"
+          num=$(gh issue list --repo "$repo" --state open --label weekly-verification \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --repo "$repo" --body-file "$RUNNER_TEMP/weekly.md"
+            gh issue comment "$num" --repo "$repo" --body "Updated by the weekly run: $RUN_URL"
+          else
+            gh issue create --repo "$repo" --label weekly-verification \
+              --title "Weekly verification: results differ from committed data" \
+              --body-file "$RUNNER_TEMP/weekly.md"
+          fi
+
+  mutants-full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - name: Mutation testing on all code
+        run: |
+          status=0
+          cargo mutants --workspace --no-shuffle || status=$?
+          case "$status" in 0|2|3) ;; *) exit "$status" ;; esac
+          rule=0
+          python3 scripts/mutation_score.py mutants.out --min-score 95 > score.md || rule=$?
+          cat score.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$rule"
