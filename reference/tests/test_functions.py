@@ -924,20 +924,20 @@ def test_gammaln_overflows_where_the_grid_description_says():
         assert functions._mp_gammaln(mpmath.mpf(2.6e305)) > mpmath.mpf("1.8e308")
 
 
-def test_gammaln_and_gammasgn_poles_are_tagged_by_rule():
-    for spec in (functions.GAMMALN, functions.GAMMASGN):
-        assert spec.input_tags(0.0) == [POLE]
-        assert spec.input_tags(-30.0) == [POLE]
-        assert spec.input_tags(-0.25) == []
-        assert spec.input_tags(1.0) == []
+def test_gammaln_poles_are_tagged_by_rule_and_left_out_of_gammasgn():
+    assert functions.GAMMALN.input_tags(0.0) == [POLE]
+    assert functions.GAMMALN.input_tags(-30.0) == [POLE]
+    assert functions.GAMMALN.input_tags(-0.25) == []
+    assert functions.GAMMALN.input_tags(1.0) == []
+    poles = {(x,) for (x,) in functions.GAMMALN.grid() if functions.GAMMALN.input_tags(x)}
+    assert len(poles) == 31
+    assert set(functions.GAMMASGN.grid()) == set(functions.GAMMALN.grid()) - poles
 
 
 def test_gammasgn_matches_the_parity_rule():
     # +1 for x > 0; (-1)^ceil(-x) for negative non-integers (DLMF 5.2.1, 5.5.3).
     with mpmath.workdps(50):
         for (x,) in functions.GAMMASGN.grid():
-            if x <= 0 and x == int(x):
-                continue
             expected = 1 if x > 0 else (-1) ** math.ceil(-x)
             assert functions._mp_gammasgn(mpmath.mpf(x)) == expected
 

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use harness::{Check, Expected, Outcome, finish};
-use special::Beta;
+use special::{Beta, Gamma};
 
 use crate::expected;
 
@@ -16,6 +16,12 @@ fn inc_beta(a: f64, b: f64, x: f64) -> f64 {
     x.inc_beta(a, b, a.ln_beta(b))
 }
 
+/// P(a, x). special puts the argument first: `x.inc_gamma(a)`. It has no
+/// upper function Q, so the `gamma_sf` data is not used.
+fn inc_gamma(a: f64, x: f64) -> f64 {
+    x.inc_gamma(a)
+}
+
 /// The x with I_x(a, b) = p, with `ln_beta` precomputed in the same way.
 fn inv_inc_beta(a: f64, b: f64, p: f64) -> f64 {
     p.inv_inc_beta(a, b, a.ln_beta(b))
@@ -24,6 +30,60 @@ fn inv_inc_beta(a: f64, b: f64, p: f64) -> f64 {
 #[test]
 fn special_matches_reference() {
     let results = [
+        Check {
+            function: "special::Gamma::gamma",
+            dataset: "gamma",
+            expected: &[],
+        }
+        .run(|p| Outcome::scalar(Gamma::gamma(p.scalar("x")))),
+        Check {
+            function: "special::Gamma::ln_gamma",
+            dataset: "gammaln",
+            expected: &[],
+        }
+        .run(|p| Outcome::scalar(Gamma::ln_gamma(p.scalar("x")).0)),
+        // The second value `ln_gamma` returns: the sign of gamma(x), +1 or -1.
+        Check {
+            function: "special::Gamma::ln_gamma (sign)",
+            dataset: "gammasgn",
+            expected: &[],
+        }
+        .run(|p| Outcome::scalar(f64::from(Gamma::ln_gamma(p.scalar("x")).1))),
+        // Time-limited although no point is known to hang: neither the series
+        // nor the continued fraction in `inc_gamma` has an iteration limit.
+        Check {
+            function: "special::Gamma::inc_gamma",
+            dataset: "gammainc",
+            expected: &[Expected {
+                finding: "016-special-inc-gamma",
+                points: expected::INC_GAMMA,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| {
+            Outcome::scalar(inc_gamma(p.scalar("a"), p.scalar("x")))
+        }),
+        Check {
+            function: "special::Gamma::inc_gamma",
+            dataset: "gamma_cdf",
+            expected: &[Expected {
+                finding: "016-special-inc-gamma",
+                points: expected::INC_GAMMA_CDF,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| {
+            Outcome::scalar(inc_gamma(p.scalar("a"), p.scalar("x")))
+        }),
+        Check {
+            function: "special::Gamma::inc_gamma",
+            dataset: "gammainc_large",
+            expected: &[Expected {
+                finding: "016-special-inc-gamma",
+                points: expected::INC_GAMMA_LARGE,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| {
+            Outcome::scalar(inc_gamma(p.scalar("a"), p.scalar("x")))
+        }),
         // Time-limited although no point is known to hang: the series in
         // `inc_beta` has no iteration limit.
         Check {

@@ -1495,6 +1495,12 @@ GAMMALN = Spec(
 )
 
 
+def _gammasgn_grid() -> list[tuple[float]]:
+    # The poles are left out: log|Gamma| is +inf there, and the conventions
+    # accept an infinity of either sign at a pole, so no sign is wrong there.
+    return [(x,) for (x,) in _gammaln_grid() if not _gamma_tags(x)]
+
+
 def _mp_gammasgn(x: mpmath.mpf) -> mpmath.mpf:
     return mpmath.sign(mpmath.gamma(x))
 
@@ -1505,15 +1511,17 @@ GAMMASGN = Spec(
     inputs=("x",),
     tolerance=0.0,
     tolerance_reason=(
-        "The sign is exactly +1 or -1 at every non-pole input, so only the exact value is "
+        "The sign is exactly +1 or -1 at every input of the grid, so only the exact value is "
         "right. For x < 0 it is (-1)^ceil(-x), for x > 0 it is +1"
     ),
-    grid_description="the gammaln grid",
-    grid=_gammaln_grid,
+    grid_description=(
+        "the gammaln grid without its poles (0, -1, ..., -30), where gamma has no sign and the "
+        "conventions accept an infinity of either sign"
+    ),
+    grid=_gammasgn_grid,
     mpmath_fn=_mp_gammasgn,
     scipy_name="scipy.special.gammasgn",
     scipy_fn=sc.gammasgn,
-    input_tags=_gamma_tags,
 )
 
 
