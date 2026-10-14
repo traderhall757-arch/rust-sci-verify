@@ -45,7 +45,7 @@ _Updated at the end of every session. Start here._
     code are excluded with reasons in `.cargo/mutants.toml`.
 
 - **Milestone 3 follow-up** (revise fix 3;
-  [PR #10](https://github.com/traderhall757-arch/rust-sci-verify/pull/10), open): a 20,000-point random check (SciPy, then mpmath for every
+  [PR #10](https://github.com/traderhall757-arch/rust-sci-verify/pull/10), merged): a 20,000-point random check (SciPy, then mpmath for every
   difference above 1e-9) showed that puruspe 0.4.4's switch between its two
   continued fractions also gives **wrong answers at ordinary parameters**
   (a or b <= 3000): up to a factor of 1e37 when 1/a + 1/b < 1, up to 80% for
@@ -66,18 +66,13 @@ _Updated at the end of every session. Start here._
 
 ## Next
 
-1. **Owner decisions needed (Milestone 3 follow-up):**
-   - Confirm the wider scope of finding 001 (wrong answers also for
-     a, b <= 3000, near the switch point).
-   - Approve submitting the revised patch
-     (`fixes/puruspe/0001-Fix-betai-for-large-a-and-b.patch`) to puruspe,
-     using the draft text in `fixes/README.md`. The fork
-     (`traderhall757-arch/puruspe`, branch `fix-betai`) still holds the old
-     commit; it must be replaced with the revised patch before a pull
-     request is opened.
-2. **Milestone 4** in a fresh session: expand coverage, starting with `yv`
+1. **Milestone 4** (next session): expand coverage, starting with `yv`
    (puruspe Bessel functions over wider ranges), with its own dataset and
    checks (owner: fine as long as it is tested).
+2. Nothing is submitted upstream until the whole project is done and tested
+   (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
+   branch `fix-betai`) still holds the old commit; replace it with the
+   revised patch only when submission is approved.
 
 ## Decisions recorded (owner, 2026-10-14)
 
@@ -91,6 +86,14 @@ _Updated at the end of every session. Start here._
   approved (this one patch only; any later report or patch needs its own approval).
   On hold after the spot-check; the revised patch (Milestone 3 follow-up)
   needs approval again.
+- Finding 001's wider scope (wrong answers also for a or b <= 3000, near the
+  switch point) confirmed.
+- **No upstream submissions** (patches, issues, pull requests) until the
+  project is finished and everything is tested; the revised puruspe patch
+  waits until then and needs approval at that time.
+- The owner merges PRs without reviewing the numerical details (unfamiliar
+  with the field), so CI checks and the evidence in each PR carry the
+  verification; keep them complete and honest.
 - The `betai` accuracy floor (Boost-style prefactor, better `ln_gamma`; also
   helps `gammp`) becomes a later milestone, after Milestone 4.
 
