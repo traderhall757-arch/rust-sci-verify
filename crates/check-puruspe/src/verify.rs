@@ -29,6 +29,12 @@ fn puruspe_matches_reference() {
             }],
         }
         .run(|p| Outcome::scalar(puruspe::betai(p.scalar("a"), p.scalar("b"), p.scalar("x")))),
+        Check {
+            function: "puruspe::Kn",
+            dataset: "kv",
+            expected: &[],
+        }
+        .run(|p| Outcome::scalar(puruspe::Kn(p.scalar("nu") as u32, p.scalar("x")))),
     ];
     finish("puruspe", &results);
 }

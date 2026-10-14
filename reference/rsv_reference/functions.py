@@ -254,4 +254,40 @@ BETAINC = Spec(
     scipy_fn=sc.betainc,
 )
 
-ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC)
+
+# --- kv --------------------------------------------------------------------
+
+_KV_NU = (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0)
+_KV_X = (
+    0.01, 0.0631, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 700.0,
+)  # fmt: skip
+
+
+def _kv_grid() -> list[tuple[float, float]]:
+    # Integer orders, so the same data checks integer-order implementations.
+    # x = 0.0631 is the pilot point where SciPy returns inf for nu = 100.
+    return sorted(itertools.product(_KV_NU, _KV_X))
+
+
+KV = Spec(
+    name="kv",
+    description="Modified Bessel function of the second kind K_nu(x), integer order",
+    inputs=("nu", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "For small x, K_nu(x) is about Gamma(nu)/2 * (2/x)^nu; rounding the base to a double "
+        "is amplified by the exponent, up to 100 * 2^-53 (about 1e-14) at nu = 100; for large "
+        "x it is about sqrt(pi/(2x)) e^-x with x exact. 1e-13 allows that plus a few ulps of "
+        "further arithmetic"
+    ),
+    grid_description=(
+        "nu in {0, 1, 2, 5, 10, 20, 50, 100} x x in {0.01, 0.0631, 0.1, 0.25, 0.5, 1, 2, 5, "
+        "10, 20, 50, 100, 200, 500, 700}; K_100(0.01) overflows"
+    ),
+    grid=_kv_grid,
+    mpmath_fn=mpmath.besselk,
+    scipy_name="scipy.special.kv",
+    scipy_fn=sc.kv,
+)
+
+ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, KV)
