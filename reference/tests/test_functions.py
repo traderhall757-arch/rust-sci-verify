@@ -9,6 +9,7 @@ import mpmath
 import pytest
 
 from rsv_reference import functions
+from rsv_reference.spec import POLE
 
 
 def close(a, b, digits=40):
@@ -17,6 +18,24 @@ def close(a, b, digits=40):
 
 def mp(*args):
     return [mpmath.mpf(a) for a in args]
+
+
+def test_gamma_matches_factorials_and_half_integers():
+    with mpmath.workdps(50):
+        for n in (1, 2, 7, 30, 171):
+            assert close(mpmath.gamma(n), mpmath.factorial(n - 1))
+        for n in (0, 3, 25):
+            # gamma(n + 1/2) = (2n)! sqrt(pi) / (4^n n!)
+            exact = mpmath.factorial(2 * n) * mpmath.sqrt(mpmath.pi)
+            exact /= mpmath.mpf(4) ** n * mpmath.factorial(n)
+            assert close(mpmath.gamma(n + mpmath.mpf(0.5)), exact)
+
+
+def test_gamma_poles_are_tagged_by_rule():
+    assert functions._gamma_tags(-6.0) == [POLE]
+    assert functions._gamma_tags(0.0) == [POLE]
+    assert functions._gamma_tags(-6.5) == []
+    assert functions._gamma_tags(6.0) == []
 
 
 @pytest.mark.parametrize("x", [0.5, 3.0, 26.75, 1e3])

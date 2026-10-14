@@ -3,7 +3,7 @@
 import mpmath
 import scipy.special as sc
 
-from .spec import Spec
+from .spec import POLE, Spec
 
 
 def _decades() -> list[float]:
@@ -58,6 +58,46 @@ ERFCX = Spec(
     scipy_fn=sc.erfcx,
 )
 
+# --- gamma -----------------------------------------------------------------
+
+
+def _gamma_grid() -> list[tuple[float]]:
+    # x = -30..180 step 0.25 (exact in binary): every pole from 0 to -30, the
+    # half-integers between them, and the overflow edge near 171.62; plus
+    # +-10^-k for tiny |x|, where gamma(x) is about 1/x.
+    dense = [i / 4 for i in range(-120, 721)]
+    tiny = [d for d in _decades() if d < 1e-5]
+    points = sorted(set(dense + tiny + [-d for d in tiny]))
+    return [(x,) for x in points]
+
+
+def _gamma_tags(x: float) -> list[str]:
+    return [POLE] if x <= 0 and x == int(x) else []
+
+
+GAMMA = Spec(
+    name="gamma",
+    description="Gamma function gamma(x) for real x",
+    inputs=("x",),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "gamma(x) grows like ((x + g - 1/2)/e)^(x - 1/2); rounding the base to a double is "
+        "amplified by the exponent, up to 171 * 2^-53 (about 2e-14) at the overflow edge "
+        "x = 171.6, and by the same amount through the reflection formula for negative x; "
+        "1e-13 allows that plus a few ulps of further arithmetic"
+    ),
+    grid_description=(
+        "x = -30..180 step 0.25 (poles at 0, -1, ..., -30; overflow above about 171.62), "
+        "plus +-10^k for k = -300..-10 step 10"
+    ),
+    grid=_gamma_grid,
+    mpmath_fn=mpmath.gamma,
+    scipy_name="scipy.special.gamma",
+    scipy_fn=sc.gamma,
+    input_tags=_gamma_tags,
+)
+
+
 # --- erfc ------------------------------------------------------------------
 
 
@@ -98,4 +138,4 @@ ERFC = Spec(
     scipy_fn=sc.erfc,
 )
 
-ALL: tuple[Spec, ...] = (ERFCX, ERFC)
+ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA)
