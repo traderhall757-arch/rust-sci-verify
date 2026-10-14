@@ -75,7 +75,7 @@ _Updated at the end of every session. Start here._
     10,000-iteration cap) and loses accuracy as x grows (1.4e-9 at
     Y_500(1e4); up to 4e-7 off the grid).
 
-- **Milestone 4, part 2: `jv`** (Bessel J; PR pending):
+- **Milestone 4, part 2: `jv`** (Bessel J; [PR #14](https://github.com/traderhall757-arch/rust-sci-verify/pull/14), open):
   - Datasets `jv` and `jv_large`: the `yv` grids and tolerances (1e-13 and
     5e-10, from the condition number |x J'/J|, tested). SciPy returns 0 for
     J_200(5) = 4.8e-296 ("SciPy wrong"); its worst on `jv_large` is 2.0e-10.
