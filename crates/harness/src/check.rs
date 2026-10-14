@@ -26,14 +26,25 @@ impl Outcome {
     }
 }
 
-/// A point where the crate is known to be wrong, documented in
-/// `findings/<finding>.md`.
+/// Points where the crate is known to be wrong, documented in
+/// `findings/<finding>.md`. Every listed point must fail and every failing
+/// point must be listed, so the list is exact.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Expected {
     /// Findings file stem, e.g. `001-puruspe-betai`.
     pub finding: &'static str,
-    /// The point's inputs, flattened in header order.
-    pub inputs: &'static [f64],
+    /// Each point's inputs, flattened in header order.
+    pub points: &'static [&'static [f64]],
+}
+
+impl Expected {
+    /// The finding that lists `inputs`, if any.
+    pub(crate) fn finding_for(expected: &[Self], inputs: &[f64]) -> Option<&'static str> {
+        expected
+            .iter()
+            .find(|e| e.points.iter().any(|p| same_inputs(p, inputs)))
+            .map(|e| e.finding)
+    }
 }
 
 /// One function of a target crate checked against one dataset.
@@ -160,25 +171,22 @@ pub fn expectation_problems(results: &[FunctionResult], findings_dir: &Path) -> 
                     e.finding
                 ));
             }
-            let failing = r.points.iter().any(|p| {
-                p.verdict.is_crate_failure()
-                    && same_inputs(&p.point.flat_inputs(&r.header), e.inputs)
-            });
-            if !failing {
-                problems.push(format!(
-                    "{name}{:?}: listed in {} but no longer fails; update the finding",
-                    e.inputs, e.finding
-                ));
+            for inputs in e.points {
+                let failing = r.points.iter().any(|p| {
+                    p.verdict.is_crate_failure()
+                        && same_inputs(&p.point.flat_inputs(&r.header), inputs)
+                });
+                if !failing {
+                    problems.push(format!(
+                        "{name}{inputs:?}: listed in {} but no longer fails; update the finding",
+                        e.finding
+                    ));
+                }
             }
         }
         for p in r.points.iter().filter(|p| p.verdict.is_crate_failure()) {
             let inputs = p.point.flat_inputs(&r.header);
-            if !r
-                .check
-                .expected
-                .iter()
-                .any(|e| same_inputs(&inputs, e.inputs))
-            {
+            if Expected::finding_for(r.check.expected, &inputs).is_none() {
                 problems.push(format!(
                     "{name}{inputs:?}: unexpected {:?} (crate {:?}, mpmath {:?})",
                     p.verdict, p.outcome, p.point.mpmath
@@ -264,7 +272,7 @@ mod tests {
     fn expectations_must_match_failures_exactly_and_cite_findings() {
         const EXP: &[Expected] = &[Expected {
             finding: "001-t-f",
-            inputs: &[0.5],
+            points: &[&[0.5]],
         }];
         let wrong = |_: &Point| Outcome::scalar(0.2);
         let dir = findings_dir(&["001-t-f"]);
@@ -313,6 +321,40 @@ mod tests {
         assert!(expectation_problems(&[check.run_on(data(), all_but_0)], &dir).is_empty());
         std::fs::remove_dir_all(dir).unwrap();
         std::fs::remove_dir_all(empty).unwrap();
+    }
+
+    #[test]
+    fn one_finding_lists_many_points() {
+        const EXP: &[Expected] = &[
+            Expected {
+                finding: "001-t-f",
+                points: &[&[1.0], &[0.5], &[-30.0]],
+            },
+            Expected {
+                finding: "002-t-f",
+                points: &[&[2.0]],
+            },
+        ];
+        assert_eq!(Expected::finding_for(EXP, &[0.5]), Some("001-t-f"));
+        assert_eq!(Expected::finding_for(EXP, &[-30.0]), Some("001-t-f"));
+        assert_eq!(Expected::finding_for(EXP, &[2.0]), Some("002-t-f"));
+        assert_eq!(Expected::finding_for(EXP, &[3.0]), None);
+        let dir = findings_dir(&["001-t-f", "002-t-f", "x"]);
+        let check = Check {
+            expected: EXP,
+            ..NONE
+        };
+        // Both dataset points fail and are listed; [1.0] and [2.0] are listed
+        // but are not in the dataset, so they "no longer fail".
+        let p = expectation_problems(&[check.run_on(data(), |_| Outcome::scalar(0.2))], &dir);
+        assert_eq!(
+            p,
+            vec![
+                "t::f[1.0]: listed in 001-t-f but no longer fails; update the finding".to_string(),
+                "t::f[2.0]: listed in 002-t-f but no longer fails; update the finding".to_string(),
+            ]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

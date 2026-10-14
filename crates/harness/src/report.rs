@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use crate::check::{FunctionResult, Outcome, PointResult, same_inputs};
+use crate::check::{Expected, FunctionResult, Outcome, PointResult};
 use crate::compare::Verdict;
 
 /// Rows listed per discrepancy table; the counts always cover every point.
@@ -57,15 +57,10 @@ fn inputs(r: &FunctionResult, p: &PointResult) -> String {
 }
 
 fn finding(r: &FunctionResult, p: &PointResult) -> String {
-    let flat = p.point.flat_inputs(&r.header);
-    r.check
-        .expected
-        .iter()
-        .find(|e| same_inputs(e.inputs, &flat))
-        .map_or_else(
-            || "**none (unexpected)**".into(),
-            |e| format!("[{0}](../findings/{0}.md)", e.finding),
-        )
+    Expected::finding_for(r.check.expected, &p.point.flat_inputs(&r.header)).map_or_else(
+        || "**none (unexpected)**".into(),
+        |f| format!("[{f}](../findings/{f}.md)"),
+    )
 }
 
 /// Worst judged error, ignoring tagged and skipped points.
@@ -210,7 +205,7 @@ mod tests {
     fn renders_summary_tables_and_findings() {
         const EXP: &[Expected] = &[Expected {
             finding: "001-t-f",
-            inputs: &[0.5],
+            points: &[&[0.5]],
         }];
         let check = Check {
             function: "t::f",

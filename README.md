@@ -20,6 +20,7 @@ See [docs/status.md](docs/status.md) for what is done and what is next, and
 | Crate | Report |
 |---|---|
 | puruspe 0.4.4 | [reports/puruspe-0.4.4.md](reports/puruspe-0.4.4.md) |
+| statrs 0.19.1 | [reports/statrs-0.19.1.md](reports/statrs-0.19.1.md) |
 
 ## Running it
 
