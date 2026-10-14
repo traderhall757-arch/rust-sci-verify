@@ -1419,8 +1419,150 @@ BETAINCINV = Spec(
     scipy_fn=sc.betaincinv,
 )
 
+# --- gammaln and gammasgn --------------------------------------------------
+
+# Near the zeros of log|Gamma| at 1 and 2: x - 1 and x - 2 are exact there.
+_GAMMALN_NEAR_ZEROS = (1e-5, 1e-10, 1e-15)
+# The overflow edge: log Gamma(x) exceeds the largest double above about 2.55e305.
+_GAMMALN_HUGE = (1e305, 2e305, 2.5e305, 2.6e305, 1e306, 1e307, 1e308, 1.7976931348623157e308)
+# Large negative non-integers (exact doubles), reached through the reflection formula.
+_GAMMALN_NEGATIVE = (-100.5, -1000.25, -10000.5, -1000000.5, -999999999999999.5)
+
+
+def _gammaln_grid() -> list[tuple[float]]:
+    # The gamma grid (x = -30..180 step 0.25 and +-10^-k), plus decades up to
+    # 1e300, the overflow edge, points next to the zeros at 1 and 2, and large
+    # negative non-integers.
+    points = {x for (x,) in _gamma_grid()}
+    points.update(_decades())
+    points.update(_GAMMALN_HUGE)
+    points.update(_GAMMALN_NEGATIVE)
+    for zero in (1.0, 2.0):
+        for d in _GAMMALN_NEAR_ZEROS:
+            points.update((zero + d, zero - d))
+    return [(x,) for x in sorted(points)]
+
+
+def _mp_gammaln(x: mpmath.mpf) -> mpmath.mpf:
+    # log|Gamma(x)|; mpmath's loggamma is complex for negative x, with this
+    # real part.
+    return mpmath.re(mpmath.loggamma(x))
+
+
+def gammaln_reflection_amplification(x: float) -> mpmath.mpf:
+    """For x < 0: (|log(pi / |sin(pi x)|)| + |log Gamma(1 - x)|) / |log|Gamma(x)||.
+
+    The reflection formula log|Gamma(x)| = log(pi / |sin(pi x)|) - log Gamma(1 - x)
+    subtracts two terms; rounding each to a double costs this many times 2^-53
+    relative to the result. It is large only near the zeros of log|Gamma|.
+    """
+    x = mpmath.mpf(x)
+    t1 = mpmath.log(mpmath.pi / abs(mpmath.sinpi(x)))
+    t2 = mpmath.loggamma(1 - x)
+    return (abs(t1) + abs(t2)) / abs(_mp_gammaln(x))
+
+
+GAMMALN = Spec(
+    name="gammaln",
+    description="Logarithm of the absolute value of the gamma function, log|gamma(x)|, for real x",
+    inputs=("x",),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "For x > 0 the value is well conditioned once x - 1 and x - 2 are formed exactly "
+        "(Sterbenz's lemma near the zeros at 1 and 2, where careful implementations such as "
+        "fdlibm and Boost expand in x - 1 and x - 2; taking log(gamma(x)) there instead loses "
+        "everything), and Stirling's series for large x costs a few ulps. For x < 0 the "
+        "reflection formula log(pi / |sin(pi x)|) - log Gamma(1 - x) subtracts two terms; "
+        "rounding them costs (|term 1| + |term 2|) / |result| times 2^-53, at most 664 on this "
+        "grid (x = -2.75, near the zero at -2.7477), so up to 7.4e-14 is unavoidable. 2e-13 "
+        "allows 2.7x that and matches the quantile tolerances. SciPy's worst error is 1.8e-15 "
+        "except at 8 of the 12 points next to 1 and 2, where it loses digits as log(gamma(x)) "
+        "would: 1.5e-12 at 1 +- 1e-5, up to 8.0e-7 at 1 +- 1e-10 and 2 - 1e-10, and 29% at "
+        "the double nearest 2 - 1e-15 (the series DLMF 5.7.3 confirms mpmath)"
+    ),
+    grid_description=(
+        "x = -30..180 step 0.25 (poles at 0, -1, ..., -30) and +-10^k for k = -300..-10 step "
+        "10 (the gamma grid), plus 10^k for k = 0..300 step 10, x = 1e305, 2e305, 2.5e305, "
+        "2.6e305, 1e306, 1e307, 1e308 and the largest double (log Gamma overflows above about "
+        "2.55e305), 1 +- d and 2 +- d for d in {1e-5, 1e-10, 1e-15} (rounded to doubles), and "
+        "x = -100.5, -1000.25, -10000.5, -1000000.5, -999999999999999.5"
+    ),
+    grid=_gammaln_grid,
+    mpmath_fn=_mp_gammaln,
+    scipy_name="scipy.special.gammaln",
+    scipy_fn=sc.gammaln,
+    input_tags=_gamma_tags,
+)
+
+
+def _mp_gammasgn(x: mpmath.mpf) -> mpmath.mpf:
+    return mpmath.sign(mpmath.gamma(x))
+
+
+GAMMASGN = Spec(
+    name="gammasgn",
+    description="Sign of the gamma function (+1 or -1) for real x, as returned with log|gamma(x)|",
+    inputs=("x",),
+    tolerance=0.0,
+    tolerance_reason=(
+        "The sign is exactly +1 or -1 at every non-pole input, so only the exact value is "
+        "right. For x < 0 it is (-1)^ceil(-x), for x > 0 it is +1"
+    ),
+    grid_description="the gammaln grid",
+    grid=_gammaln_grid,
+    mpmath_fn=_mp_gammasgn,
+    scipy_name="scipy.special.gammasgn",
+    scipy_fn=sc.gammasgn,
+    input_tags=_gamma_tags,
+)
+
+
+# --- gammainc_large --------------------------------------------------------
+
+# Shapes around and above 1e8; for 1e8 and 1e9 also the bulk x = a + k sqrt(a)
+# (exact for a = 1e8; x - a is exact for every point by Sterbenz's lemma).
+_GAMMAINC_LARGE_A = (1e8, 1e9, 1e10, 1e15, 1e20)
+_GAMMAINC_LARGE_BULK_A = (1e8, 1e9)
+_GAMMAINC_LARGE_K = (-30, -10, -3, -1, 0, 1, 3, 10, 30)
+
+
+def _gammainc_large_grid() -> list[tuple[float, float]]:
+    points = set()
+    for a in _GAMMAINC_LARGE_A:
+        points.update((a, x) for x in (1e8, 2e8, a / 2, 0.9 * a, 1.1 * a, 2 * a, 1e300))
+    for a in _GAMMAINC_LARGE_BULK_A:
+        points.update((a, a + k * math.sqrt(a)) for k in _GAMMAINC_LARGE_K)
+    return sorted(points)
+
+
+GAMMAINC_LARGE = Spec(
+    name="gammainc_large",
+    description=("Regularized lower incomplete gamma function P(a, x) for large shapes a >= 1e8"),
+    inputs=("a", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "The function and method of gammainc and gamma_cdf, with their tolerance. The condition "
+        "number |x f(x) / P| grows like k sqrt(a) at x = a + k sqrt(a) (9.5e5 at a = 1e9, "
+        "k = -30), so a method that rounds x / a would lose about 1e-10; one that forms x - a "
+        "exactly (Sterbenz's lemma) and expands in (x - a) / a (Temme, DLMF 8.12; Boost) loses "
+        "about k^2 2^-53 (1e-13 at k = 30). Far from the bulk P rounds to 0 or 1. SciPy's worst "
+        "error is 2.7e-15 except in the lower tail at x = a - 10 sqrt(a) and a - 30 sqrt(a): "
+        "13% and 0.24% off at a = 1e8, 53% and 15% off at a = 1e9 (P about 7e-24 and 2e-198; "
+        "numerical integration confirms mpmath)"
+    ),
+    grid_description=(
+        "a in {1e8, 1e9, 1e10, 1e15, 1e20} x x in {1e8, 2e8, a/2, 0.9a, 1.1a, 2a, 1e300}, plus "
+        "x = a + k sqrt(a) for a in {1e8, 1e9} and k in {-30, -10, -3, -1, 0, 1, 3, 10, 30}"
+    ),
+    grid=_gammainc_large_grid,
+    mpmath_fn=_mp_gamma_cdf,
+    scipy_name="scipy.special.gammainc",
+    scipy_fn=sc.gammainc,
+)
+
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, BETAINCINV,
+    GAMMALN, GAMMASGN, GAMMAINC_LARGE,
 )  # fmt: skip

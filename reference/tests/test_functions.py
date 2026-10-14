@@ -847,3 +847,156 @@ def test_betaincinv_log_magnitude_matches_the_tolerance_reason():
     assert (a, b, p) == (1.0, 1e4, 1e-300)
     assert 699.9 < worst < 700.0
     assert functions.BETAINCINV.tolerance >= 2 * worst * 2.0**-53
+
+
+# --- gammaln, gammasgn, gammainc_large ---
+
+
+@pytest.mark.parametrize("x", [0.25, 0.75, 3.5, 30.25, 170.5, 1e-300])
+def test_gammaln_matches_log_of_gamma_for_positive_x(x):
+    with mpmath.workdps(50):
+        (x,) = mp(x)
+        assert close(functions._mp_gammaln(x), mpmath.log(mpmath.gamma(x)))
+
+
+@pytest.mark.parametrize("x", [-1e-300, -0.5, -2.75, -2.5, -29.75, -1000000.5])
+def test_gammaln_matches_reflection_formula_for_negative_x(x):
+    # log|Gamma(x)| = log(pi / |sin(pi x)|) - log Gamma(1 - x) (DLMF 5.5.3).
+    with mpmath.workdps(60):
+        (x,) = mp(x)
+        expected = mpmath.log(mpmath.pi / abs(mpmath.sinpi(x))) - mpmath.loggamma(1 - x)
+        assert close(functions._mp_gammaln(x), expected, digits=45)
+
+
+@pytest.mark.parametrize("d", [1e-5, -1e-5, 1e-10, -1e-10, 1e-15, -1e-15])
+def test_gammaln_matches_the_series_next_to_one_and_two(d):
+    # log Gamma(1 + z) = -gamma z + sum_{k>=2} (-1)^k zeta(k) z^k / k (DLMF 5.7.3),
+    # and log Gamma(2 + z) = log Gamma(1 + z) + log(1 + z). z = x - 1 or x - 2 is
+    # exact for the double x. SciPy is up to 29% off at these points.
+    with mpmath.workdps(50):
+        for zero in (1.0, 2.0):
+            x = mpmath.mpf(zero + d)
+            z = x - zero
+            series = -mpmath.euler * z + mpmath.nsum(
+                lambda k, z=z: (-1) ** k * mpmath.zeta(k) * z**k / k, [2, mpmath.inf]
+            )
+            if zero == 2.0:
+                series += mpmath.log1p(z)
+            assert close(functions._mp_gammaln(x), series)
+
+
+@pytest.mark.parametrize("x", [1e10, 1e100, 1e300, 2.5e305, 1.7976931348623157e308])
+def test_gammaln_matches_stirling_at_large_x(x):
+    # (x - 1/2) log x - x + log(2 pi) / 2 + 1 / (12 x) - 1 / (360 x^3) (DLMF 5.11.1);
+    # the next term is below 1e-40 for x >= 1e10.
+    with mpmath.workdps(60):
+        (x,) = mp(x)
+        stirling = (x - 0.5) * mpmath.log(x) - x + mpmath.log(2 * mpmath.pi) / 2
+        stirling += 1 / (12 * x) - 1 / (360 * x**3)
+        assert close(functions._mp_gammaln(x), stirling, digits=45)
+
+
+def test_gammaln_reflection_amplification_matches_the_tolerance_reason():
+    # The largest cancellation in the reflection formula on the grid (x = -2.75,
+    # next to the zero at -2.7477), against the tolerance's 2.5x margin.
+    with mpmath.workdps(30):
+        worst, at = max(
+            (functions.gammaln_reflection_amplification(x), x)
+            for (x,) in functions.GAMMALN.grid()
+            if x < 0 and x != int(x)
+        )
+        zero = mpmath.findroot(lambda t: functions._mp_gammaln(t), -2.75)
+    assert at == -2.75
+    assert 663 < worst < 664
+    assert -2.7477 < zero < -2.7476
+    assert 7.3e-14 < worst * 2.0**-53 < 7.4e-14
+    assert functions.GAMMALN.tolerance >= 2.5 * worst * 2.0**-53
+
+
+def test_gammaln_overflows_where_the_grid_description_says():
+    # log Gamma(x) = 1.797e308 at x of about 2.553e305.
+    data = Path(__file__).resolve().parent.parent / "data" / "gammaln.jsonl"
+    rows = [json.loads(line) for line in data.read_text().splitlines()[1:]]
+    overflow = sorted(r["in"]["x"][0] for r in rows if "overflow" in r.get("tags", []))
+    assert overflow == [2.6e305, 1e306, 1e307, 1e308, 1.7976931348623157e308]
+    with mpmath.workdps(30):
+        assert functions._mp_gammaln(mpmath.mpf(2.5e305)) < mpmath.mpf(1.7976931348623157e308)
+        assert functions._mp_gammaln(mpmath.mpf(2.6e305)) > mpmath.mpf("1.8e308")
+
+
+def test_gammaln_and_gammasgn_poles_are_tagged_by_rule():
+    for spec in (functions.GAMMALN, functions.GAMMASGN):
+        assert spec.input_tags(0.0) == [POLE]
+        assert spec.input_tags(-30.0) == [POLE]
+        assert spec.input_tags(-0.25) == []
+        assert spec.input_tags(1.0) == []
+
+
+def test_gammasgn_matches_the_parity_rule():
+    # +1 for x > 0; (-1)^ceil(-x) for negative non-integers (DLMF 5.2.1, 5.5.3).
+    with mpmath.workdps(50):
+        for (x,) in functions.GAMMASGN.grid():
+            if x <= 0 and x == int(x):
+                continue
+            expected = 1 if x > 0 else (-1) ** math.ceil(-x)
+            assert functions._mp_gammasgn(mpmath.mpf(x)) == expected
+
+
+def _quad_gammainc(a: float, x: float, lower: bool) -> mpmath.mpf:
+    # P(a, x) = x^a e^-x / Gamma(a) int_0^1 exp((a - 1) log(1 - s) + x s) ds (x < a - 1), or
+    # Q(a, x) = x^a e^-x / Gamma(a) int_0^inf exp((a - 1) log(1 + s) - x s) ds, with
+    # t = x (1 -+ s) in DLMF 8.2.1 / 8.2.2. The integrand peaks at s = 0 and decays
+    # on the scale h, so the breakpoints double from h / 8.
+    a, x = mp(a, x)
+    with mpmath.extraprec(80):
+        h = 1 / (abs(a - 1 - x) + mpmath.sqrt(a))
+        if lower:
+            ends = [h * 2**j / 8 for j in range(200) if h * 2**j / 8 < 1]
+            points = [0, *ends, 1]
+            integral = mpmath.quad(lambda s: mpmath.exp((a - 1) * mpmath.log1p(-s) + x * s), points)
+        else:
+            points = [0, *[h * 2**j / 8 for j in range(40)], mpmath.inf]
+            integral = mpmath.quad(lambda s: mpmath.exp((a - 1) * mpmath.log1p(s) - x * s), points)
+        return mpmath.exp(a * mpmath.log(x) - x - mpmath.loggamma(a)) * integral
+
+
+@pytest.mark.parametrize(
+    ("a", "k"),
+    [(1e8, -30), (1e8, -10), (1e8, -3), (1e9, -30), (1e9, -10), (1e9, -1), (1e8, 0), (1e9, 1)],
+)
+def test_gammainc_large_matches_numerical_integration(a, k):
+    # An independent route at the bulk points, including the four where SciPy
+    # is off (k = -10 and -30). Q for x >= a - 1, where P = 1 - Q is not small.
+    x = a + k * math.sqrt(a)
+    with mpmath.workdps(30):
+        a_mp, x_mp = mp(a, x)
+        if x < a - 1:
+            assert close(functions._mp_gamma_cdf(a_mp, x_mp), _quad_gammainc(a, x, True), 25)
+        else:
+            assert close(functions._mp_gamma_sf(a_mp, x_mp), _quad_gammainc(a, x, False), 25)
+
+
+def test_gammainc_large_condition_number_matches_the_tolerance_reason():
+    # The largest condition number at a normal, nonzero point is 9.5e5 at a = 1e9,
+    # x = a - 30 sqrt(a): rounding x / a there would cost about 1e-10, far above
+    # the tolerance, while a careful method's k^2 2^-53 fits.
+    with mpmath.workdps(30):
+        worst, at = max(
+            (functions.gamma_cdf_condition(a, x), (a, x))
+            for a, x in functions.GAMMAINC_LARGE.grid()
+            if functions._mp_gamma_cdf(mpmath.mpf(a), mpmath.mpf(x)) >= mpmath.mpf(2) ** -1022
+        )
+    assert at == (1e9, 1e9 - 30 * math.sqrt(1e9))
+    assert 9.4e5 < worst < 9.6e5
+    assert 1.0e-10 < worst * 2.0**-53 < 1.1e-10
+    assert 30**2 * 2.0**-53 < functions.GAMMAINC_LARGE.tolerance / 9
+
+
+def test_gammainc_large_grid_crosses_1e8_and_reaches_1e20():
+    grid = functions.GAMMAINC_LARGE.grid()
+    assert min(a for a, _ in grid) == 1e8
+    assert max(a for a, _ in grid) == 1e20
+    # Points on both sides of x = 1e8 at a = 1e8, and x > 1e8 below the mean.
+    assert any(a == 1e8 and x < 1e8 for a, x in grid)
+    assert any(a == 1e8 and x > 1e8 for a, x in grid)
+    assert all(any(a == b and 1e8 < x < a for b, x in grid) for a in (1e9, 1e10, 1e15, 1e20))
