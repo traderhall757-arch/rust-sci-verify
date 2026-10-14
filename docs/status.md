@@ -46,15 +46,18 @@ _Updated at the end of every session. Start here._
 
 ## Next
 
-1. Owner reviews and merges the Milestone 3 PR ([PR #8](https://github.com/traderhall757-arch/rust-sci-verify/pull/8)).
-2. Submit the puruspe patch (approved). This session cannot reach
-   `Axect/puruspe`: the owner forks it on GitHub and adds the fork to a session
-   (or submits it with `git am` + `--reset-author`, see `fixes/README.md`).
-   Then record the link in finding 001 and set its status to "reported".
-3. Owner sets up the `main` ruleset requiring the CI checks (if not done yet).
-4. **Milestone 4** in a fresh session: expand coverage, starting with `yv`
-   (puruspe Bessel functions over wider ranges), with its own dataset and
-   checks (owner: fine as long as it is tested).
+1. **puruspe patch on hold (2026-10-14).** The fork exists
+   (`traderhall757-arch/puruspe`, branch `fix-betai`, one commit, no pull
+   request opened). A random spot-check before submission found that fix 3
+   makes some results worse (up to 1.8e-8 for b < 0.06, x near 1), more than
+   the patch text says; details in finding 001. Next session (Milestone 3
+   follow-up): add small-b points to the `betainc` data so CI covers this
+   region, revise fix 3, re-verify (grid and random spot-check), regenerate the
+   patch, then ask the owner again before submitting. Owner wants the
+   disclosure line changed to "submitted by me on the project's behalf".
+2. **Milestone 4** in a fresh session after that: expand coverage, starting
+   with `yv` (puruspe Bessel functions over wider ranges), with its own dataset
+   and checks (owner: fine as long as it is tested).
 
 ## Decisions recorded (owner, 2026-10-14)
 
@@ -66,6 +69,7 @@ _Updated at the end of every session. Start here._
 - Finding 001's extended scope (all a, b > 3000) confirmed.
 - Submitting `fixes/puruspe/0001-Fix-betai-for-large-a-and-b.patch` to puruspe
   approved (this one patch only; any later report or patch needs its own approval).
+  On hold after the spot-check; a revised patch needs approval again.
 - The `betai` accuracy floor (Boost-style prefactor, better `ln_gamma`; also
   helps `gammp`) becomes a later milestone, after Milestone 4.
 
