@@ -183,4 +183,75 @@ GAMMAINC = Spec(
     scipy_fn=sc.gammainc,
 )
 
-ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA, GAMMAINC)
+
+# --- betainc ---------------------------------------------------------------
+
+_BETAINC_AB = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 100.0, 1000.0, 10000.0)
+_BETAINC_X = (0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99)
+
+
+def _betainc_grid() -> list[tuple[float, float, float]]:
+    # Every (a, b, x) triple, plus x = a/(a+b) (the mode region, where the
+    # result is far from 0 and 1 even for large a and b).
+    triples = set(itertools.product(_BETAINC_AB, _BETAINC_AB, _BETAINC_X))
+    triples |= {(a, b, a / (a + b)) for a in _BETAINC_AB for b in _BETAINC_AB}
+    return sorted(triples)
+
+
+def _mp_betainc(a: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """I_x(a, b) for 0 < x < 1 by the hypergeometric series DLMF 8.17.8:
+
+        I_x(a, b) = x^a (1-x)^b / (a B(a, b)) * sum_n (a+b)_n / (a+1)_n x^n,
+
+    used for x <= (a+1)/(a+b+2), where the term ratio (a+b+n) x / (a+1+n) is
+    below 1 from the start, and the symmetry I_x(a, b) = 1 - I_(1-x)(b, a)
+    otherwise. All terms are positive, so the sum has no cancellation.
+
+    mpmath.betainc is not used because it takes minutes per point near the
+    mode for a, b around 1e4. Tested against mpmath.betainc and an exact
+    binomial sum in tests/test_functions.py.
+    """
+    y = mpmath.fsub(1, x, exact=True)
+    if x > (a + 1) / (a + b + 2):
+        return 1 - _mp_betainc(b, a, y)
+    eps = mpmath.mpf(2) ** (-mpmath.mp.prec - 10)
+    total = term = mpmath.mpf(1)
+    n = 0
+    while True:
+        ratio = (a + b + n) * x / (a + 1 + n)
+        term *= ratio
+        total += term
+        n += 1
+        # The ratio decreases with n when b >= 1 and stays below x when
+        # b < 1, which bounds the remaining tail geometrically.
+        bound = ratio if b >= 1 else x
+        if term * bound / (1 - bound) < eps * total:
+            break
+    return x**a * y**b / (a * mpmath.beta(a, b)) * total
+
+
+BETAINC = Spec(
+    name="betainc",
+    description="Regularized incomplete beta function I_x(a, b) = B(x; a, b) / B(a, b)",
+    inputs=("a", "b", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "I is the prefix x^a (1-x)^b / (a B(a, b)) times a well-conditioned series or "
+        "continued fraction. On this grid the logarithms of the prefix's factors reach "
+        "2.8e4 in magnitude (a = b = 1e4) while their sum stays above -745; forming them "
+        "separately in double precision loses up to 2.8e4 * 2^-53 (about 3e-12), and "
+        "combining them before rounding (Boost's Lanczos-based prefix) loses far less. "
+        "1e-12 demands the careful approach and is 6x the worst SciPy error on this grid "
+        "(1.6e-13)"
+    ),
+    grid_description=(
+        "a, b in {0.1, 0.5, 1, 2, 5, 10, 100, 1000, 10000} x "
+        "x in {0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99}, plus x = a/(a+b)"
+    ),
+    grid=_betainc_grid,
+    mpmath_fn=_mp_betainc,
+    scipy_name="scipy.special.betainc",
+    scipy_fn=sc.betainc,
+)
+
+ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC)
