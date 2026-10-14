@@ -1,0 +1,18 @@
+[package]
+name = "check-puruspe"
+version = "0.1.0"
+description = "Verification of the puruspe crate against mpmath and SciPy reference data"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+harness.workspace = true
+# Exact pin: a new puruspe release is checked by the weekly job first, then
+# adopted here in its own pull request.
+puruspe = "=0.4.4"
+
+[lints]
+workspace = true

@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/harness", "crates/check-puruspe"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/traderhall757-arch/rust-sci-verify"
+publish = false
+
+[workspace.dependencies]
+harness = { path = "crates/harness" }
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: parse every decimal to the exactly nearest double. Without
+# it serde_json may be off by one ulp, which would corrupt the reference data.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+unreachable_pub = "deny"
+dead_code = "deny"
+unused = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+float_cmp = "deny"
