@@ -64,12 +64,26 @@ _Updated at the end of every session. Start here._
   - Draft upstream PR text with the disclosure line "submitted by me on the
     project's behalf" in `fixes/README.md`.
 
+- **Milestone 4, part 1: `yv`** (Bessel Y; [PR #12](https://github.com/traderhall757-arch/rust-sci-verify/pull/12), open):
+  - Datasets `yv` (120 points, x <= 20, tolerance 1e-13) and `yv_large`
+    (80 points, x from 50 to 1e6, tolerance 5e-10), integer orders 0..500.
+    Tolerances come from the condition number |x Y'/Y| (tested); SciPy's
+    worst is 5.0e-14 and 2.6e-11.
+  - `puruspe::Yn` passes both (worst 3.4e-14 and 5.5e-11).
+  - `puruspe::Jnu_Ynu` fails 29 points: **finding 005 (draft)**. It panics
+    for x >= nu + 9845 (Numerical Recipes' continued fraction hits its
+    10,000-iteration cap) and loses accuracy as x grows (1.4e-9 at
+    Y_500(1e4); up to 4e-7 off the grid).
+
 ## Next
 
-1. **Milestone 4** (next session): expand coverage, starting with `yv`
-   (puruspe Bessel functions over wider ranges), with its own dataset and
-   checks (owner: fine as long as it is tested).
-2. Nothing is submitted upstream until the whole project is done and tested
+1. Owner: review and merge PR #12; approve or reject finding 005 (draft).
+2. **Milestone 4, continued** (next session): next Bessel family, e.g. `jv`
+   (puruspe `Jn` and the J result of `Jnu_Ynu`), then `iv`; non-integer
+   orders need their own dataset (the current ones are integer-order so
+   `Yn`/`Kn` can use them). Rest of Milestone 4 per the roadmap: statrs
+   distributions, the `special` crate, statrs hypothesis tests.
+3. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
    revised patch only when submission is approved.
@@ -109,6 +123,8 @@ _Updated at the end of every session. Start here._
 - Under the error metric, a subnormal result flushed to zero is wrong (relative
   to the smallest normal double). SciPy does this for erfc(26.75), erfc(27.0)
   and gammainc(200, 2).
+- `yv` and `yv_large` take about 10 s together. The `yv` grids leave out
+  x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);
   `betainc_switch` about 30 s. Its grid leaves out a = 1e5 with x = 1 - 1e-4,
   where the reference series needs millions of terms.
