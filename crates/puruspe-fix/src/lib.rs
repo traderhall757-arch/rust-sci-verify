@@ -9,14 +9,19 @@
 //! `src/beta.rs`; `EPS`, `FPMIN`, `Y` and `W` from `src/lib.rs`. puruspe is
 //! MIT OR Apache-2.0, Copyright (c) 2021 Tae Geun Kim; its MIT license text
 //! is in `LICENSE-MIT-puruspe`. `ln_gamma` is the pinned crate's own. The
-//! algorithms follow Numerical Recipes, 3rd ed., section 6.4.
+//! algorithms follow Numerical Recipes, 3rd ed., section 6.4; the patched
+//! switch point a / (a + b) is the one Boost.Math's `ibeta_imp` uses for
+//! a, b >= 1 (the idea only; no Boost code is copied).
 //! `scripts/check_fixes.py` (CI) checks that the copies equal the patched
 //! upstream source, so the code tested here is the code in the patch.
 //!
-//! **Verified accuracy.** Relative error at most 5.15e-10 on the `betainc`
-//! grid and 4.1e-10 on `betainc_large`, against mpmath (reports in
-//! `reports/puruspe-fix-0.1.0.md`; CI asserts at most 6e-10). The fix does
-//! not touch the remaining error, which comes from the prefactor
+//! **Verified accuracy.** Relative error against mpmath at most 1.8e-10 on
+//! the `betainc` grid, 4.1e-10 on `betainc_large` and 3.0e-9 on
+//! `betainc_switch` (reports in `reports/puruspe-fix-0.1.0.md`; CI asserts
+//! 2.5e-10, 5e-10 and 3.5e-9). A random check of 20,000 inputs found at most
+//! 1.1e-9 where a or b <= 3000, and up to 4.8e-6 on results below 1e-115
+//! where both exceed 3000 (finding 001). The fix does not touch the
+//! remaining error, which comes from the prefactor
 //! `exp(ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + ...)`; see the finding.
 //!
 //! The copies keep upstream formatting and idioms, hence the `rustfmt::skip`
@@ -94,7 +99,7 @@ pub fn betai(a: f64, b: f64, x: f64) -> f64 {
         return betaiapprox(a, b, x);
     }
     let bt = (ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + a * x.ln() + b * (1f64 - x).ln()).exp();
-    if x < (a + 1f64) / (a + b + 2f64) {
+    if x < a / (a + b) {
         bt * betacf(a, b, x) / a
     } else {
         1f64 - bt * betacf(b, a, 1f64 - x) / b

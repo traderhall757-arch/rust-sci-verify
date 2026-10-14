@@ -88,7 +88,16 @@ def test_betainc_series_matches_binomial_sum_for_integer_a_b(a, b, x):
 
 
 @pytest.mark.parametrize(
-    "a, b, x", [(0.1, 0.5, 0.3), (0.5, 0.1, 0.99), (5, 0.1, 0.9), (0.1, 100, 0.01), (10, 2.5, 0.7)]
+    "a, b, x",
+    [
+        (0.1, 0.5, 0.3),
+        (0.5, 0.1, 0.99),
+        (5, 0.1, 0.9),
+        (0.1, 100, 0.01),
+        (10, 2.5, 0.7),
+        (3e4, 0.0125, 0.99998),  # small b, x near 1 (betainc_switch)
+        (2900, 1000, 0.6677528530633166),  # between two switch points (betainc_switch)
+    ],
 )
 def test_betainc_series_matches_mpmath_betainc(a, b, x):
     # Non-integer parameters, both branches of the symmetry switch.
@@ -123,6 +132,25 @@ def test_betainc_series_symmetric_point_at_large_parameters():
     # betainc_large grid, where the series needs the most terms.
     with mpmath.workdps(50):
         assert close(functions._mp_betainc(*mp(1e5, 1e5, 0.5)), mpmath.mpf(0.5))
+
+
+@pytest.mark.parametrize("b, y", [(0.01, 1e-10), (0.02, 1e-6), (0.5, 1e-10), (0.2, 1e-1)])
+def test_betainc_series_matches_closed_form_for_a_1(b, y):
+    # I_x(1, b) = 1 - (1-x)^b (integrate the definition with a = 1), at x = 1 - y as in
+    # betainc_switch: small b and x close to 1.
+    x = 1 - y
+    with mpmath.workdps(50):
+        exact = 1 - (1 - mpmath.mpf(x)) ** b
+        assert close(functions._mp_betainc(*mp(1, b, x)), exact)
+
+
+def test_betainc_switch_grid_targets_small_b_and_the_switch_region():
+    grid = functions._betainc_switch_grid()
+    assert len(grid) == 186
+    assert all(0 < x < 1 for _, _, x in grid)
+    assert not set(grid) & set(functions._betainc_grid())
+    # Small b with x close to 1, where the regression of finding 001 was.
+    assert sum(b < 0.1 and x > 0.9999 for _, b, x in grid) >= 50
 
 
 def test_betainc_large_grid_spans_both_tails_above_puruspe_switch():

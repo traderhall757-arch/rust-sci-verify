@@ -299,6 +299,72 @@ BETAINC_LARGE = Spec(
 )
 
 
+# --- betainc_switch ----------------------------------------------------------
+
+_BETAINC_SWITCH_A = (1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0)
+_BETAINC_SWITCH_B = (0.01, 0.02, 0.05, 0.2, 0.5)
+_BETAINC_SWITCH_Y = (1e-1, 1e-2, 1e-4, 1e-6, 1e-8, 1e-10)
+_BETAINC_SWITCH_AB = (10.0, 100.0, 1000.0, 2900.0)
+# Worst points of the 2026-10-14 random spot-check (finding 001), as quoted there.
+_BETAINC_SWITCH_SPOT = (
+    (73256.2, 0.01866, 0.9999945374),
+    (58386.6, 0.01965, 0.9999866779),
+    (97698.9, 0.0166, 0.9999973151),
+    (7457.77, 0.02365, 0.9998657733),
+    (15.766, 0.01229, 0.9565398173),
+)
+
+
+def _betainc_switch_grid() -> list[tuple[float, float, float]]:
+    # Where the choice between the direct form I_x(a, b) and the complement
+    # 1 - I_(1-x)(b, a) decides the accuracy (finding 001):
+    # - small b with x close to 1, where I is still far from 1: x = 1 - y;
+    # - b > 2, halfway between puruspe 0.4.4's switch (a+1)/(a+2b) and
+    #   Numerical Recipes' (a+1)/(a+b+2).
+    # Left out: y < 1e-2 with a * y >= 2 (only a = 1e5, y = 1e-4), where x is
+    # below every candidate switch point, so all use the direct fraction,
+    # and the reference series needs about 1/y terms (minutes per point).
+    small_b = {
+        (a, b, 1 - y)
+        for a, b, y in itertools.product(_BETAINC_SWITCH_A, _BETAINC_SWITCH_B, _BETAINC_SWITCH_Y)
+        if y >= 1e-2 or a * y < 2
+    }
+    between = {
+        (a, b, ((a + 1) / (a + 2 * b) + (a + 1) / (a + b + 2)) / 2)
+        for a, b in itertools.product(_BETAINC_SWITCH_AB, repeat=2)
+    }
+    # Points already in betainc are left out.
+    return sorted((small_b | between | set(_BETAINC_SWITCH_SPOT)) - set(_betainc_grid()))
+
+
+BETAINC_SWITCH = Spec(
+    name="betainc_switch",
+    description=(
+        "Regularized incomplete beta function I_x(a, b) where the choice between "
+        "I_x(a, b) and 1 - I_(1-x)(b, a) matters (same function as betainc)"
+    ),
+    inputs=("a", "b", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "Same reasoning as betainc: the logarithms of the prefix's factors reach 1.1e6 in "
+        "magnitude here (ln Gamma(1e5)), so forming them separately in double precision loses "
+        "up to about 1e-10, and computing a small I as 1 - I_(1-x)(b, a) magnifies that by "
+        "(1 - I)/I. Combining them before rounding, and computing the smaller of I and 1 - I "
+        "directly, avoids both. 1e-12 is 17x the worst SciPy error on this grid (5.9e-14)"
+    ),
+    grid_description=(
+        "a in {1, 10, 100, 1e3, 1e4, 1e5} x b in {0.01, 0.02, 0.05, 0.2, 0.5} x "
+        "x = 1 - y, y in {1e-1, 1e-2, 1e-4, 1e-6, 1e-8, 1e-10}; a, b in {10, 100, 1000, "
+        "2900} with x halfway between (a+1)/(a+2b) and (a+1)/(a+b+2); 5 points from a "
+        "random spot-check (finding 001); without a = 1e5 with y = 1e-4 and points in betainc"
+    ),
+    grid=_betainc_switch_grid,
+    mpmath_fn=_mp_betainc,
+    scipy_name="scipy.special.betainc",
+    scipy_fn=sc.betainc,
+)
+
+
 # --- kv --------------------------------------------------------------------
 
 _KV_NU = (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0)
@@ -334,4 +400,6 @@ KV = Spec(
     scipy_fn=sc.kv,
 )
 
-ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, KV)
+ALL: tuple[Spec, ...] = (
+    ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV,
+)  # fmt: skip
