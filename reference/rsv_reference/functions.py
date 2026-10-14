@@ -1019,8 +1019,290 @@ T_PPF = Spec(
     input_tags=_t_ppf_tags,
 )
 
+# --- gamma distribution (shape a, rate 1) -------------------------------------
+
+# Shapes: below 1 (density infinite at 0), small integers and half-integers
+# (chi-squared with df = 2a), and large a where the distribution is close to
+# normal with mean a and sd sqrt(a).
+_GAMMA_A = (0.01, 0.1, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0,
+            1e3, 1e4, 1e5, 1e6)  # fmt: skip
+_GAMMA_X = (0.0, 1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.5, 1.0, 2.0,
+            5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 700.0, 750.0, 1e3, 1e4, 1e5,
+            1e6, 1e7, 1e10, 1e300)  # fmt: skip
+# Points a + k sqrt(a) (rounded to doubles) across the bulk and both tails.
+_GAMMA_K = (-30, -10, -3, -1, 1, 3, 10, 30)
+
+
+def _gamma_x_grid() -> list[tuple[float, float]]:
+    points = set()
+    for a in _GAMMA_A:
+        points.update((a, x) for x in _GAMMA_X)
+        points.update((a, x) for k in _GAMMA_K if (x := a + k * math.sqrt(a)) > 0)
+    return sorted(points)
+
+
+def _mp_gamma_prefix(a: mpmath.mpf, x: mpmath.mpf, shift: int) -> mpmath.mpf:
+    # x^a e^-x / Gamma(a + shift), formed from its logarithm. The terms of the
+    # logarithm reach 1.4e7 (a = 1e6) and cancel to about -k^2 / 2, so the
+    # caller's 60 extra bits keep the result far beyond the working precision.
+    return mpmath.exp(a * mpmath.log(x) - x - mpmath.loggamma(a + shift))
+
+
+def _mp_gamma_lower_series(a: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """P(a, x) by the positive-term series DLMF 8.7.1 / 8.11.4,
+
+        P(a, x) = x^a e^-x / Gamma(a + 1) * sum_k x^k / ((a + 1) ... (a + k)).
+
+    Every term is positive, so there is no cancellation; the terms shrink once
+    a + k > x. Used for x < a + 1, where about sqrt(a) * 15 terms suffice.
+    """
+    eps = mpmath.mpf(2) ** (-mpmath.mp.prec - 10)
+    with mpmath.extraprec(60):
+        term = total = mpmath.mpf(1)
+        n = 0
+        while True:
+            n += 1
+            term *= x / (a + n)
+            total += term
+            if a + n > x and term < eps * total:
+                return _mp_gamma_prefix(a, x, 1) * total
+
+
+def _mp_gamma_upper_cf(a: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """Q(a, x) by the continued fraction DLMF 8.9.2 (Legendre), in the even form
+
+        Q(a, x) = x^a e^-x / Gamma(a) * 1 / (x + 1 - a - 1 (1 - a) / (x + 3 - a - 2 (2 - a) / ...)),
+
+    evaluated with the modified Lentz method. Used for x >= a + 1, where it
+    converges fast (about sqrt(a) * 10 steps near the mean).
+    """
+    eps = mpmath.mpf(2) ** (-mpmath.mp.prec - 10)
+    tiny = mpmath.mpf(2) ** (-10 * mpmath.mp.prec)
+    with mpmath.extraprec(60):
+        b = x + 1 - a
+        c = 1 / tiny
+        d = 1 / b
+        f = d
+        for n in range(1, 10**7):
+            an = -n * (n - a)
+            b += 2
+            d = an * d + b
+            d = 1 / (d if d != 0 else tiny)
+            c = b + an / c
+            c = c if c != 0 else tiny
+            delta = c * d
+            f *= delta
+            if abs(delta - 1) < eps:
+                return _mp_gamma_prefix(a, x, 0) * f
+    raise ArithmeticError(f"gamma continued fraction ({a}, {x}) did not converge")
+
+
+def _mp_gamma_cdf(a: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """P(a, x), the gamma distribution's cdf at x (shape a, rate 1).
+
+    mpmath.gammainc fails to converge for a = 1e6 near the mean ("series
+    converges too slowly"), so the dataset uses its own two routes, tested
+    against mpmath.gammainc, finite sums and closed forms. The complements
+    1 - Q and 1 - P are taken only where they are not small (x >= a + 1 and
+    x < a + 1), so no digits are lost beyond the 60 extra bits.
+    """
+    if x == 0:
+        return mpmath.mpf(0)
+    if x < a + 1:
+        return _mp_gamma_lower_series(a, x)
+    return 1 - _mp_gamma_upper_cf(a, x)
+
+
+def _mp_gamma_sf(a: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """Q(a, x) = 1 - P(a, x), the survival function (shape a, rate 1)."""
+    if x == 0:
+        return mpmath.mpf(1)
+    if x < a + 1:
+        return 1 - _mp_gamma_lower_series(a, x)
+    return _mp_gamma_upper_cf(a, x)
+
+
+def _mp_gamma_pdf(a: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    return mpmath.exp((a - 1) * mpmath.log(x) - x - mpmath.loggamma(a))
+
+
+def gamma_cdf_condition(a: float, x: float) -> mpmath.mpf:
+    """|x f(x) / P(a, x)|: the relative change of P per relative change of x.
+
+    About a in the lower tail (P is about x^a / Gamma(a + 1)) and about
+    k sqrt(a) at x = a - k sqrt(a) for large a.
+    """
+    a, x = mpmath.mpf(a), mpmath.mpf(x)
+    return abs(x * _mp_gamma_pdf(a, x) / _mp_gamma_cdf(a, x))
+
+
+def gamma_sf_condition(a: float, x: float) -> mpmath.mpf:
+    """|x f(x) / Q(a, x)|: about x in the upper tail (Q is about x^(a-1) e^-x / Gamma(a))."""
+    a, x = mpmath.mpf(a), mpmath.mpf(x)
+    return abs(x * _mp_gamma_pdf(a, x) / _mp_gamma_sf(a, x))
+
+
+def _gamma_ppf_grid() -> list[tuple[float, float]]:
+    # The t_ppf probabilities: both tails, the smallest subnormal, the bulk
+    # and 1/2 +- 1e-10; p = 0 and 1 are poles.
+    lower = [5e-324, 1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4]
+    upper = [0.6, 0.75, 0.9, 0.95, 0.99, 0.999, 1 - 1e-5, 1 - 1e-10, 1 - 1e-15]
+    middle = [0.5 - 1e-10, 0.5, 0.5 + 1e-10]
+    ps = sorted({0.0, 1.0, *lower, *middle, *upper})
+    return [(a, p) for a in _GAMMA_A for p in ps]
+
+
+def _gamma_ppf_tags(a: float, p: float) -> list[str]:
+    # The quantile is +inf at p = 1. At p = 0 it is 0, the end of the support:
+    # a finite value, so not a pole (a crate returning 0 there is right).
+    return [POLE] if p == 1.0 else []
+
+
+def _mp_gamma_ppf(a: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """The x with P(a, x) = p (0 < p < 1), by Newton's method on a logarithm.
+
+    For p <= 1/2 the root of log P(a, e^u) = log p, for p > 1/2 the root of
+    log Q(a, e^u) = log(1 - p) (1 - p is exact for a double p at any working
+    precision above 53 bits). In u = log x both sides are smooth and monotone,
+    with slopes x f / P and -x f / Q. The search starts from the
+    Wilson-Hilferty approximation (or, where that is not positive, from the
+    lower-tail power law P = x^a / Gamma(a + 1)), brackets the root, bisects
+    to within 1e-3 and then converges quadratically. ppf(0) = 0.
+    """
+    if p == 0:
+        return mpmath.mpf(0)
+    lower = p <= mpmath.mpf(1) / 2
+    q = p if lower else 1 - p
+    sign = 1 if lower else -1
+    eps = mpmath.mpf(10) ** (-mpmath.mp.dps - 5)
+    with mpmath.extradps(20):
+        log_q = mpmath.log(q)
+
+        def g(u: mpmath.mpf) -> mpmath.mpf:
+            # Increasing in u for both branches after the sign.
+            x = mpmath.exp(u)
+            tail = _mp_gamma_cdf(a, x) if lower else _mp_gamma_sf(a, x)
+            return sign * (mpmath.log(tail) - log_q)
+
+        z = -mpmath.sqrt(2) * mpmath.erfinv(1 - 2 * p)  # the normal quantile
+        w = 1 - 1 / (9 * a) + z / (3 * mpmath.sqrt(a))
+        u0 = 3 * mpmath.log(w) + mpmath.log(a) if w > 0 else (log_q + mpmath.loggamma(a + 1)) / a
+        lo = hi = u0
+        step = mpmath.mpf(1) / 1000
+        while g(lo) > 0:
+            lo -= step
+            step *= 2
+        step = mpmath.mpf(1) / 1000
+        while g(hi) < 0:
+            hi += step
+            step *= 2
+        while hi - lo > mpmath.mpf(1) / 1000:
+            mid = (lo + hi) / 2
+            if g(mid) > 0:
+                hi = mid
+            else:
+                lo = mid
+        u = (lo + hi) / 2
+        for _ in range(100):
+            x = mpmath.exp(u)
+            tail = _mp_gamma_cdf(a, x) if lower else _mp_gamma_sf(a, x)
+            step = g(u) / (x * _mp_gamma_pdf(a, x) / tail)
+            u -= step
+            if abs(step) <= eps:
+                return mpmath.exp(u)
+    raise ArithmeticError(f"gamma_ppf({a}, {p}) did not converge")
+
+
+_GAMMA_A_DESCRIPTION = "a in {0.01, 0.1, 0.5, 1, 1.5, 2, 3, 5, 10, 20, 50, 100, 1e3, 1e4, 1e5, 1e6}"
+
+GAMMA_CDF = Spec(
+    name="gamma_cdf",
+    description=(
+        "Gamma distribution cumulative distribution function P(a, x) (shape a, rate 1); "
+        "chi-squared with df = 2a at 2x"
+    ),
+    inputs=("a", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "With rate 1 this is P(a, x), the function of the gammainc dataset, so it gets "
+        "gammainc's tolerance (accepted by the owner, to be revisited). The condition number "
+        "|x f(x) / P| reaches 3.0e4 (a = 1e6, x = a - 30 sqrt(a)), so a method that rounds x / a "
+        "loses up to 3.3e-12 there; one that forms x - a exactly (Sterbenz's lemma, "
+        "a/2 <= x <= 2a) and expands in (x - a) / a, as Temme's uniform expansion does (DLMF "
+        "8.12; Boost), loses only about k^2 2^-53 at x = a + k sqrt(a) (1e-13 at k = 30), so "
+        "1e-12 demands such a method. SciPy's worst error here is 3.5e-13 (a = 1000, x = 500), "
+        "except 2.1e-10 at a = 1e6, x = 990000 (P = 5.4e-24; the finite sum DLMF 8.4.10 "
+        "confirms mpmath) and a subnormal result flushed to 0 at a = 50, x = 1e-5. Results "
+        "below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_GAMMA_A_DESCRIPTION} x x in {{0, 1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, "
+        "0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 700, 750, 1e3, 1e4, 1e5, 1e6, 1e7, 1e10, "
+        "1e300}, plus x = a + k sqrt(a) (rounded to a double) for k in {-30, -10, -3, -1, 1, 3, "
+        "10, 30} where positive"
+    ),
+    grid=_gamma_x_grid,
+    mpmath_fn=_mp_gamma_cdf,
+    scipy_name="scipy.stats.gamma.cdf",
+    scipy_fn=lambda a, x: st.gamma.cdf(x, a),
+)
+
+GAMMA_SF = Spec(
+    name="gamma_sf",
+    description=(
+        "Gamma distribution survival function Q(a, x) = 1 - P(a, x) (shape a, rate 1); "
+        "chi-squared with df = 2a at 2x"
+    ),
+    inputs=("a", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "Q = 1 - P, with gamma_cdf's tolerance for the same reasons: the condition number "
+        "|x f(x) / Q| reaches 3.0e4 at a = 1e6, x = a + 30 sqrt(a), and is about x in the upper "
+        "tail (up to about 745 at a normal result). SciPy's worst error here is 7.4e-13 "
+        "(a = 1000, x = a + 30 sqrt(a)), except a subnormal result flushed to 0 at a = 5, "
+        "x = 750"
+    ),
+    grid_description="the gamma_cdf grid",
+    grid=_gamma_x_grid,
+    mpmath_fn=_mp_gamma_sf,
+    scipy_name="scipy.stats.gamma.sf",
+    scipy_fn=lambda a, x: st.gamma.sf(x, a),
+)
+
+GAMMA_PPF = Spec(
+    name="gamma_ppf",
+    description=(
+        "Gamma distribution quantile function, the x with P(a, x) = p (shape a, rate 1); "
+        "half the chi-squared quantile with df = 2a"
+    ),
+    inputs=("a", "p"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "p and a are exact doubles and 1 - p is exact for p >= 1/2, but in the lower tail the "
+        "quantile is x = exp(L) with L = (log p + log Gamma(a + 1)) / a approximately; rounding L "
+        "(or 1/a, which multiplies it) to a double changes x by |L| times 2^-53. The largest |L| "
+        "at a nonzero, normal quantile on this grid is 691.3 (a = 0.01, p = 1e-3, x = 5.7e-301), "
+        "so up to 7.7e-14 is unavoidable; 2e-13 allows 2.6x that and matches t_ppf. SciPy's "
+        "worst error at the points it gets within tolerance is 1.1e-13 (a = 0.01, p = 0.01); it "
+        "fails 6 points: 4.2e-12 to 4.7e-6 off at p = 5e-324 for a >= 100, and 4.7e-11 off at "
+        "a = 1e6, p = 1e-10"
+    ),
+    grid_description=(
+        f"{_GAMMA_A_DESCRIPTION} x p in {{0, 5e-324, 1e-300, 1e-100, 1e-50, 1e-20, 1e-10, "
+        "1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, 1/2 - 1e-10, 1/2, 1/2 + 1e-10, 0.6, 0.75, 0.9, "
+        "0.95, 0.99, 0.999, and the doubles nearest 1 - 1e-5, 1 - 1e-10, 1 - 1e-15, 1}; the "
+        "quantile is 0 at p = 0 (the end of the support) and p = 1 is tagged pole (+inf); for "
+        "small a the lower-tail quantiles are below the smallest double"
+    ),
+    grid=_gamma_ppf_grid,
+    mpmath_fn=_mp_gamma_ppf,
+    scipy_name="scipy.stats.gamma.ppf",
+    scipy_fn=lambda a, p: st.gamma.ppf(p, a),
+    input_tags=_gamma_ppf_tags,
+)
+
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
-    T_CDF, T_SF, T_PPF,
+    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
 )  # fmt: skip
