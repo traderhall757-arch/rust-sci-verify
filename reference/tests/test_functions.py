@@ -191,6 +191,65 @@ def test_yv_condition_numbers_match_the_tolerance_reasons(spec, grid, bound):
     assert spec.tolerance >= 2 * worst * 2.0**-53
 
 
+def test_jv_matches_power_series():
+    # J_n(x) = (x/2)^n sum_k (-x^2/4)^k / (k! (n+k)!) (DLMF 10.2.2), summed at 120 digits
+    # (the terms reach about 1e7 at x = 20 before they fall, so 50 digits would do).
+    for n, x in [(0, 20.0), (1, 10.0), (5, 0.1), (100, 20.0), (500, 20.0), (500, 1e-10)]:
+        with mpmath.workdps(120):
+            xm = mpmath.mpf(x)
+            q, term, k, total = -(xm**2) / 4, 1 / mpmath.factorial(n), 0, mpmath.mpf(0)
+            while k < 5 or abs(term) > abs(total) * mpmath.mpf(10) ** -110:
+                total += term
+                k += 1
+                term *= q / (k * (n + k))
+            series = (xm / 2) ** n * total
+        with mpmath.workdps(50):
+            assert close(mpmath.besselj(n, mpmath.mpf(x)), series, digits=40), (n, x)
+
+
+@pytest.mark.parametrize("nu", [0, 1, 5, 100, 500])
+def test_jv_matches_hankel_expansion_at_large_x(nu):
+    # J_nu(x) ~ sqrt(2/(pi x)) (cos w sum_k (-1)^k a_2k / x^2k - sin w sum_k (-1)^k
+    # a_2k+1 / x^(2k+1)), with w and a_k as for Y (DLMF 10.17.3).
+    with mpmath.workdps(60):
+        x = mpmath.mpf(1e6)
+        mu = 4 * mpmath.mpf(nu) ** 2
+        p, q, term, k = mpmath.mpf(0), mpmath.mpf(0), mpmath.mpf(1), 0
+        while abs(term) > mpmath.mpf(10) ** -55:
+            if k % 4 == 0:
+                p += term
+            elif k % 4 == 1:
+                q += term
+            elif k % 4 == 2:
+                p -= term
+            else:
+                q -= term
+            k += 1
+            term *= (mu - (2 * k - 1) ** 2) / (k * 8 * x)
+        w = x - nu * mpmath.pi / 2 - mpmath.pi / 4
+        expansion = mpmath.sqrt(2 / (mpmath.pi * x)) * (mpmath.cos(w) * p - mpmath.sin(w) * q)
+        assert close(mpmath.besselj(nu, x), expansion, digits=40)
+
+
+@pytest.mark.parametrize(
+    "spec, grid, bound",
+    [
+        (functions.JV, functions._yv_grid, 200),
+        (functions.JV_LARGE, functions._yv_large_grid, 2.2e6),
+    ],
+)
+def test_jv_condition_numbers_match_the_tolerance_reasons(spec, grid, bound):
+    # As for yv: the largest |x J'/J| at a normal (not underflowed) point of the grid.
+    with mpmath.workdps(30):
+        worst = max(
+            functions.jv_condition(nu, x)
+            for nu, x in grid()
+            if abs(mpmath.besselj(nu, x)) >= mpmath.mpf(2) ** -1022
+        )
+    assert bound * 0.97 < worst <= bound
+    assert spec.tolerance >= 2 * worst * 2.0**-53
+
+
 def test_grids_have_no_duplicates():
     for spec in functions.ALL:
         grid = list(spec.grid())

@@ -12,6 +12,16 @@ fn ynu(p: &Point) -> Outcome {
     Outcome::scalar(puruspe::Jnu_Ynu(p.scalar("nu"), p.scalar("x")).1)
 }
 
+/// `J_n` through the integer-order function.
+fn jn(p: &Point) -> Outcome {
+    Outcome::scalar(puruspe::Jn(p.scalar("nu") as u32, p.scalar("x")))
+}
+
+/// `J_nu` through the real-order function, which also returns `Y_nu`.
+fn jnu(p: &Point) -> Outcome {
+    Outcome::scalar(puruspe::Jnu_Ynu(p.scalar("nu"), p.scalar("x")).0)
+}
+
 #[test]
 fn puruspe_matches_reference() {
     let results = [
@@ -90,6 +100,42 @@ fn puruspe_matches_reference() {
             }],
         }
         .run(ynu),
+        Check {
+            function: "puruspe::Jn",
+            dataset: "jv",
+            expected: &[Expected {
+                finding: "006-puruspe-jn",
+                points: expected::JN,
+            }],
+        }
+        .run(jn),
+        Check {
+            function: "puruspe::Jn",
+            dataset: "jv_large",
+            expected: &[Expected {
+                finding: "006-puruspe-jn",
+                points: expected::JN_LARGE,
+            }],
+        }
+        .run(jn),
+        Check {
+            function: "puruspe::Jnu_Ynu",
+            dataset: "jv",
+            expected: &[Expected {
+                finding: "005-puruspe-jnu_ynu",
+                points: expected::JNU_JV,
+            }],
+        }
+        .run(jnu),
+        Check {
+            function: "puruspe::Jnu_Ynu",
+            dataset: "jv_large",
+            expected: &[Expected {
+                finding: "005-puruspe-jnu_ynu",
+                points: expected::JNU_JV_LARGE,
+            }],
+        }
+        .run(jnu),
     ];
     finish("puruspe", &results);
 }
