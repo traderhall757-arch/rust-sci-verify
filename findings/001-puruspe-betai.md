@@ -7,8 +7,9 @@
   same day). Root cause diagnosed and a fix prepared (milestone 3). A random
   spot-check before submission showed that bug 3 also gives wrong answers at
   ordinary parameters (a, b <= 3000), and that the first fix for it lost
-  accuracy for small b; the fix was revised (milestone 3 follow-up). The wider
-  scope and the revised patch need the owner's approval again; not submitted.
+  accuracy for small b; the fix was revised (milestone 3 follow-up). Wider
+  scope confirmed by owner (2026-10-14). Not submitted: nothing goes upstream
+  until the project is finished and tested (owner's decision).
 - **Affected inputs:** the exact lists are `BETAI`, `BETAI_LARGE` and `BETAI_SWITCH` in
   `crates/check-puruspe/src/expected.rs`, the report is
   [reports/puruspe-0.4.4.md](../reports/puruspe-0.4.4.md); tolerance 1e-12.
@@ -139,8 +140,8 @@ time to a copy of the code and rerunning the reference data.
 fixes bugs 1 to 3 (three lines) and adds a regression test to puruspe's
 `tests/beta_test.rs` that fails before and passes after (and also fails
 with the first version of fix 3). It applies to puruspe 0.4.4 and to
-upstream `main` (commit `f3eb94b`, same file). Not submitted: the revised
-patch needs the owner's approval.
+upstream `main` (commit `f3eb94b`, same file). Not submitted: held until the
+project is finished and tested, then needs the owner's approval.
 
 Verified here as `puruspe_fix::betai` (crate `crates/puruspe-fix`, a verbatim
 copy of the patched items, kept identical by `scripts/check_fixes.py`); report
