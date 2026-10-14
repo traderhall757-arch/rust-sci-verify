@@ -64,33 +64,32 @@ _Updated at the end of every session. Start here._
   - Draft upstream PR text with the disclosure line "submitted by me on the
     project's behalf" in `fixes/README.md`.
 
-- **Milestone 4, part 1: `yv`** (Bessel Y; [PR #12](https://github.com/traderhall757-arch/rust-sci-verify/pull/12), open):
+- **Milestone 4, part 1: `yv`** (Bessel Y; [PR #12](https://github.com/traderhall757-arch/rust-sci-verify/pull/12), merged):
   - Datasets `yv` (120 points, x <= 20, tolerance 1e-13) and `yv_large`
     (80 points, x from 50 to 1e6, tolerance 5e-10), integer orders 0..500.
     Tolerances come from the condition number |x Y'/Y| (tested); SciPy's
     worst is 5.0e-14 and 2.6e-11.
   - `puruspe::Yn` passes both (worst 3.4e-14 and 5.5e-11).
-  - `puruspe::Jnu_Ynu` fails 29 points: **finding 005 (draft)**. It panics
+  - `puruspe::Jnu_Ynu` fails 29 points: **finding 005**, approved by owner (2026-10-14). It panics
     for x >= nu + 9845 (Numerical Recipes' continued fraction hits its
     10,000-iteration cap) and loses accuracy as x grows (1.4e-9 at
     Y_500(1e4); up to 4e-7 off the grid).
 
 ## Next
 
-1. Owner: review and merge PR #12; approve or reject finding 005 (draft).
-2. **Milestone 4, continued** (next session): next Bessel family, e.g. `jv`
+1. **Milestone 4, continued** (next session): next Bessel family, e.g. `jv`
    (puruspe `Jn` and the J result of `Jnu_Ynu`), then `iv`; non-integer
    orders need their own dataset (the current ones are integer-order so
    `Yn`/`Kn` can use them). Rest of Milestone 4 per the roadmap: statrs
    distributions, the `special` crate, statrs hypothesis tests.
-3. Nothing is submitted upstream until the whole project is done and tested
+2. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
    revised patch only when submission is approved.
 
 ## Decisions recorded (owner, 2026-10-14)
 
-- Findings 001 to 004 approved.
+- Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
 - Tolerance 1e-12 accepted for `gammainc` and `betainc` (1e-13 elsewhere);
   **revisit later** (owner's note), e.g. once a Boost/Temme-quality
   implementation shows what is achievable.
