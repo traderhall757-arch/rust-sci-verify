@@ -3,7 +3,7 @@
 - **Crate / version:** puruspe 0.4.4
 - **Severity:** medium (panic instead of a value; the docs warn "Also panics if
   `x` is too large"), plus a low-severity accuracy loss
-- **Status:** draft
+- **Status:** approved by owner (2026-10-14)
 - **Affected inputs:** 29 of 80 points of `reference/data/yv_large.jsonl`
   (tolerance 5e-10); the exact list is `JNU_YNU_LARGE` in
   `crates/check-puruspe/src/expected.rs`, the report is
