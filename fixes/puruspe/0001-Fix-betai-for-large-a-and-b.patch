@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
-Date: Wed, 14 Oct 2026 15:48:20 +0000
-Subject: [PATCH] Fix betai for large a and b
+Date: Wed, 14 Oct 2026 18:00:00 +0000
+Subject: [PATCH] Fix betai for large a and b and near the switch point
 
 Three independent bugs made `betai` return wrong values:
 
@@ -18,30 +18,55 @@ Three independent bugs made `betai` return wrong values:
    which is what the sign stood for. Example: betai(1e4, 1e4, 0.7)
    returned -0 (true value 1 to double precision).
 
-3. `betai` switched between the continued fraction for I_x(a, b) and for
-   1 - I_(1-x)(b, a) at x = (a + 1) / (a + 2b) instead of
-   (a + 1) / (a + b + 2), the point below which the continued fraction
-   converges rapidly (Numerical Recipes, 3rd ed., section 6.4). Between
-   the two it was evaluated where it is numerically unstable. Example:
-   betai(1e4, 1e3, 0.9) was 3.1% low.
+3. `betai` switched between the continued fraction for I_x(a, b) and the
+   one for 1 - I_(1-x)(b, a) at x = (a + 1) / (a + 2b). The first
+   converges rapidly for x < (a + 1) / (a + b + 2), the second above it
+   (Numerical Recipes, 3rd ed., section 6.4), a point close to the mean
+   a / (a + b). Away from it, on the wrong side, each fraction can be
+   badly wrong in floating point. When 1/a + 1/b < 1 (for
+   example a, b > 2) that switch is below the mean, and the second
+   fraction was used where it is unstable; otherwise (for example b < 1)
+   it is above the mean, above 1 when b < 1/2, and the first one was.
+   Examples: betai(1e4, 1e3, 0.9) was 3% low, betai(1e3, 500, 0.6)
+   returned 1.05 (true value 4.8e-8), and betai(50, 0.2, 0.99999999)
+   was 2% low. The switch is now the mean itself, as in Boost.Math's
+   `ibeta_imp` for a, b >= 1.
 
-   Trade-off: for small b and x close to 1 the result now comes from
-   1 - (...) and loses accuracy when it is small; the worst case we
-   found is betai(100, 0.1, 0.99), from 1.3e-11 to 5.1e-10 relative
-   error. That is within the error `ln_gamma` already
-   causes elsewhere (up to 5.7e-10 before this change).
+   We also tried Numerical Recipes' switch (a + 1) / (a + b + 2). It
+   fixes the wrong values but lies below the mean when b is small, so
+   for small b and x close to 1 the result came from 1 - (a value close
+   to 1), which magnifies the prefactor's rounding error: up to 1.1e-8
+   relative error (1.06e-8 at (3e4, 0.0125, 0.99998), now part of the
+   test, against 6.3e-11 with the mean).
 
-Expected values are from mpmath at 50 and 100 significant digits. The
-new test fails before this change and passes after it.
+Verification against mpmath: 20,000 random inputs (a, b log-uniform
+in 1e-2..1e5; x uniform, near the mean, or within 1e-6 of 0 or 1),
+compared with SciPy, every difference above 1e-9 re-checked with mpmath
+at 50 digits. The test's expected values agree at 50 and 100 digits.
+
+- Continued fractions (a or b <= 3000; the 15,649 inputs whose result
+  is above 1e-300, where SciPy is reliable): largest relative error now
+  1.1e-9; before, 414 inputs were off by more than 1e-6.
+  44 inputs become more than 10 times less accurate, all with b < 0.12
+  and x > 0.993, worst 7.2e-10 (was 4.3e-11).
+- Quadrature (a and b > 3000, 1,009 inputs): 7 are off by more than
+  1e-9, up to 4.8e-6, all with results below 1e-115 (they returned 0
+  before).
+
+The remaining error comes from the prefactor
+`exp(ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + ...)`, whose
+rounding grows with the size of its terms, and is not changed here.
+
+The new test fails before this change and passes after it.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  src/beta.rs        |  6 +++---
- tests/beta_test.rs | 24 ++++++++++++++++++++++++
- 2 files changed, 27 insertions(+), 3 deletions(-)
+ tests/beta_test.rs | 29 +++++++++++++++++++++++++++++
+ 2 files changed, 32 insertions(+), 3 deletions(-)
 
 diff --git a/src/beta.rs b/src/beta.rs
-index aec936a..8ea5fb6 100644
+index aec936a..b84bc28 100644
 --- a/src/beta.rs
 +++ b/src/beta.rs
 @@ -70,7 +70,7 @@ pub fn betai(a: f64, b: f64, x: f64) -> f64 {
@@ -49,7 +74,7 @@ index aec936a..8ea5fb6 100644
      }
      let bt = (ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + a * x.ln() + b * (1f64 - x).ln()).exp();
 -    if x < (a + 1f64) / (a + b * 2f64) {
-+    if x < (a + 1f64) / (a + b + 2f64) {
++    if x < a / (a + b) {
          bt * betacf(a, b, x) / a
      } else {
          1f64 - bt * betacf(b, a, 1f64 - x) / b
@@ -69,20 +94,21 @@ index aec936a..8ea5fb6 100644
      } else {
          -ans
 diff --git a/tests/beta_test.rs b/tests/beta_test.rs
-index adb1377..5b75d9a 100644
+index adb1377..940c46f 100644
 --- a/tests/beta_test.rs
 +++ b/tests/beta_test.rs
-@@ -21,6 +21,18 @@ fn test_betai() {
+@@ -21,6 +21,19 @@ fn test_betai() {
      }
  }
  
 +#[test]
-+fn test_betai_large_parameters() {
-+    // Regression test: these inputs returned 0, -0 or a value 3% too low.
-+    // Expected values from mpmath at 50 and 100 digits. The tolerance is
-+    // looser than in `test_betai`: the prefactor, computed from differences
-+    // of `ln_gamma` values, limits the accuracy to about 6e-10 here.
-+    for &(a, b, x, expected) in BETAI_LARGE_TABLE.iter() {
++fn test_betai_regressions() {
++    // Inputs that returned wrong values, plus accuracy guards for small b
++    // and x near 1 (see the table). Expected values from mpmath at 50 and
++    // 100 digits. The tolerance is looser than in `test_betai`: the
++    // prefactor, computed from differences of `ln_gamma` values, limits the
++    // accuracy to 1e-10 to 1e-9 for some inputs.
++    for &(a, b, x, expected) in BETAI_REGRESSION_TABLE.iter() {
 +        let result = betai(a, b, x);
 +        assert_relative_eq!(result, expected, epsilon = 0f64, max_relative = 1e-9);
 +    }
@@ -91,19 +117,26 @@ index adb1377..5b75d9a 100644
  #[test]
  fn test_invbetai() {
      for &(a, b, p, expected) in INVBETAI_TABLE.iter() {
-@@ -578,3 +590,15 @@ const INVBETAI_TABLE: [(f64, f64, f64, f64); 49] = [
+@@ -578,3 +591,19 @@ const INVBETAI_TABLE: [(f64, f64, f64, f64); 49] = [
          7.46046920485483e-01,
      ),
  ];
 +
-+const BETAI_LARGE_TABLE: [(f64, f64, f64, f64); 7] = [
-+    // Gauss-Legendre branch (a, b > 3000): centre and both tails.
++const BETAI_REGRESSION_TABLE: [(f64, f64, f64, f64); 10] = [
++    // Gauss-Legendre branch (a, b > 3000): returned 0 or -0.
 +    (1e4, 1e4, 0.5, 0.5),
 +    (1e4, 1e4, 0.7, 1.0),
 +    (3001.0, 3001.0, 0.4354664089448028, 5.0440856660254465e-24),
 +    (5000.0, 2e4, 0.20252977153321, 0.841343524310709),
-+    // Continued-fraction branch, near the switch point.
++    // Continued fractions: returned values 3% off, 2e7 times too large, 2% off.
 +    (1e4, 1e3, 0.9, 6.15295567297501e-4),
++    (1e3, 500.0, 0.6, 4.7967341365663715e-8),
++    (50.0, 0.2, 0.99999999, 0.9402723801256446),
++    // Continued fractions, small b and x near 1: accuracy guards.
 +    (1e4, 0.1, 0.99, 3.713540930257269e-47),
 +    (1e4, 0.1, 0.9999900000999989, 0.17245201791471385),
++    (3e4, 0.0125, 0.99998, 5.72560911335655e-3),
 +];
+-- 
+2.43.0
+
