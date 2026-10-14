@@ -121,6 +121,76 @@ def test_kv_matches_upward_recurrence():
         assert math.isfinite(float(value)) and float(value) > 5e305
 
 
+@pytest.mark.parametrize("x", [1e-3, 1.0, 20.0, 1e3, 1e6])
+def test_yv_satisfies_the_wronskian(x):
+    # J_{n+1}(x) Y_n(x) - J_n(x) Y_{n+1}(x) = 2 / (pi x) (DLMF 10.5.2 with 10.6.2), for
+    # every order on the grid; checks besselj against bessely across both datasets.
+    with mpmath.workdps(60):
+        x = mpmath.mpf(x)
+        for n in (0, 1, 2, 5, 10, 20, 50, 100, 200, 500):
+            w = mpmath.besselj(n + 1, x) * mpmath.bessely(n, x) - mpmath.besselj(
+                n, x
+            ) * mpmath.bessely(n + 1, x)
+            assert close(w, 2 / (mpmath.pi * x), digits=40), n
+
+
+def test_yv_matches_upward_recurrence():
+    # Y_{n+1}(x) = (2n/x) Y_n(x) - Y_{n-1}(x) (DLMF 10.6.1), stable upwards for Y,
+    # started from Y_0 and Y_1; reaches Y_500 at x = 20 (finite, about -1e646).
+    with mpmath.workdps(80):
+        x = mpmath.mpf(20)
+        prev, cur = mpmath.bessely(0, x), mpmath.bessely(1, x)
+        for n in range(1, 500):
+            prev, cur = cur, 2 * n / x * cur - prev
+    with mpmath.workdps(50):
+        assert close(mpmath.bessely(500, mpmath.mpf(20)), cur, digits=35)
+
+
+@pytest.mark.parametrize("nu", [0, 1, 5, 100, 500])
+def test_yv_matches_hankel_expansion_at_large_x(nu):
+    # Y_nu(x) ~ sqrt(2/(pi x)) (sin w sum_k (-1)^k a_2k / x^2k + cos w sum_k (-1)^k
+    # a_2k+1 / x^(2k+1)), w = x - nu pi/2 - pi/4, a_k = prod_{j=1..k} (4 nu^2 - (2j-1)^2)
+    # / (k! 8^k) (DLMF 10.17.4); at x = 1e6 the terms fall below 1e-45 quickly.
+    with mpmath.workdps(60):
+        x = mpmath.mpf(1e6)
+        mu = 4 * mpmath.mpf(nu) ** 2
+        p, q, term, k = mpmath.mpf(0), mpmath.mpf(0), mpmath.mpf(1), 0
+        while abs(term) > mpmath.mpf(10) ** -55:
+            if k % 4 == 0:
+                p += term
+            elif k % 4 == 1:
+                q += term
+            elif k % 4 == 2:
+                p -= term
+            else:
+                q -= term
+            k += 1
+            term *= (mu - (2 * k - 1) ** 2) / (k * 8 * x)
+        w = x - nu * mpmath.pi / 2 - mpmath.pi / 4
+        expansion = mpmath.sqrt(2 / (mpmath.pi * x)) * (mpmath.sin(w) * p + mpmath.cos(w) * q)
+        assert close(mpmath.bessely(nu, x), expansion, digits=40)
+
+
+@pytest.mark.parametrize(
+    "spec, grid, bound",
+    [
+        (functions.YV, functions._yv_grid, 430),
+        (functions.YV_LARGE, functions._yv_large_grid, 2.2e6),
+    ],
+)
+def test_yv_condition_numbers_match_the_tolerance_reasons(spec, grid, bound):
+    # The tolerances of yv and yv_large are derived from the largest condition number
+    # |x Y'/Y| at a finite point of the grid; the reasons quote these bounds.
+    with mpmath.workdps(30):
+        worst = max(
+            functions.yv_condition(nu, x)
+            for nu, x in grid()
+            if abs(mpmath.bessely(nu, x)) < mpmath.mpf(2) ** 1024
+        )
+    assert bound * 0.97 < worst <= bound
+    assert spec.tolerance >= 2 * worst * 2.0**-53
+
+
 def test_grids_have_no_duplicates():
     for spec in functions.ALL:
         grid = list(spec.grid())
