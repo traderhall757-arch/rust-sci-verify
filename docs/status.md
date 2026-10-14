@@ -20,8 +20,8 @@ Split into one pull request per function family (CLAUDE.md rule 1), merged in
 this order:
 
   1. **erfc** (merged): statrs `erfc` (finding 004, low: about 10 digits; 111 of 281 points); new `check-statrs` crate; harness `Expected` lists all points of a finding.
-  2. **gamma** (this PR): statrs `gamma` (finding 003, high: finite at poles, early overflow; 187 of 901 points).
-  3. **gammainc** (to do): puruspe `gammp` (finding 002, medium: NaN for a >= 100; 78 of 192 points); tolerance 1e-12.
+  2. **gamma** (merged): statrs `gamma` (finding 003, high: finite at poles, early overflow; 187 of 901 points).
+  3. **gammainc** (this PR): puruspe `gammp` (finding 002, medium: NaN for a >= 100; 78 of 192 points); tolerance 1e-12.
   4. **betainc** (to do): puruspe `betai` (finding 001, high: 0 instead of 0.5 at a = b = 1e4; 336 of 639 points); tolerance 1e-12.
   5. **kv** (to do): puruspe `Kn` vs the SciPy false alarm K_100(0.0631) = inf (SciPy wrong, crate right); no finding.
 

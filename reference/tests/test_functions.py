@@ -57,6 +57,18 @@ def test_erfc_large_x_branch_matches_direct_formula():
         assert functions._mp_erfc(mpmath.mpf(1e300)) > 0  # tiny, not an error
 
 
+@pytest.mark.parametrize("a, x", [(1, 0.5), (5, 2.0), (500, 100.0), (1000, 2000.0), (20, 20.0)])
+def test_gammainc_matches_finite_sum_for_integer_a(a, x):
+    # For integer a, Q(a, x) = e^-x sum_{k<a} x^k / k! (DLMF 8.4.10). At 400
+    # digits, 1 - Q keeps enough digits even where P is about 1e-178.
+    with mpmath.workdps(400):
+        xm = mpmath.mpf(x)
+        q = mpmath.exp(-xm) * mpmath.fsum(xm**k / mpmath.factorial(k) for k in range(a))
+        exact = 1 - q
+    with mpmath.workdps(50):
+        assert close(functions._mp_gammainc(*mp(a, x)), exact)
+
+
 def test_grids_have_no_duplicates():
     for spec in functions.ALL:
         grid = list(spec.grid())
