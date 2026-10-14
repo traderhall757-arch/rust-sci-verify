@@ -47,11 +47,10 @@ _Updated at the end of every session. Start here._
 ## Next
 
 1. Owner reviews and merges the Milestone 3 PR ([PR #8](https://github.com/traderhall757-arch/rust-sci-verify/pull/8)).
-2. Owner decisions needed (see the PR's "Questions for the owner"):
-   - finding 001 now covers **all** inputs with a, b > 3000 (was 4 points): re-confirm;
-   - whether and when to submit the patch to puruspe (rule 8: needs approval);
-   - whether to fix the accuracy floor (a Boost-style prefactor and a better
-     `ln_gamma`; larger change, also helps `gammp`) as a later milestone.
+2. Submit the puruspe patch (approved). This session cannot reach
+   `Axect/puruspe`: the owner forks it on GitHub and adds the fork to a session
+   (or submits it with `git am` + `--reset-author`, see `fixes/README.md`).
+   Then record the link in finding 001 and set its status to "reported".
 3. Owner sets up the `main` ruleset requiring the CI checks (if not done yet).
 4. **Milestone 4** in a fresh session: expand coverage, starting with `yv`
    (puruspe Bessel functions over wider ranges), with its own dataset and
@@ -64,6 +63,11 @@ _Updated at the end of every session. Start here._
   **revisit later** (owner's note), e.g. once a Boost/Temme-quality
   implementation shows what is achievable.
 - Milestone 2 split into one PR per function family.
+- Finding 001's extended scope (all a, b > 3000) confirmed.
+- Submitting `fixes/puruspe/0001-Fix-betai-for-large-a-and-b.patch` to puruspe
+  approved (this one patch only; any later report or patch needs its own approval).
+- The `betai` accuracy floor (Boost-style prefactor, better `ln_gamma`; also
+  helps `gammp`) becomes a later milestone, after Milestone 4.
 
 ## Known problems / notes
 

@@ -3,8 +3,9 @@
 - **Crate / version:** puruspe 0.4.4
 - **Severity:** high (silently wrong answers: 0 instead of 0.5, 3% off), plus a
   low-severity accuracy loss at most other points
-- **Status:** approved by owner (2026-10-14). Root cause diagnosed and a fix
-  prepared (2026-10-14, milestone 3); not reported upstream.
+- **Status:** approved by owner (2026-10-14; extended scope re-confirmed the
+  same day). Root cause diagnosed and a fix prepared (milestone 3); submitting
+  the fix upstream is approved, not yet done.
 - **Affected inputs:** the exact lists are `BETAI` and `BETAI_LARGE` in
   `crates/check-puruspe/src/expected.rs`, the report is
   [reports/puruspe-0.4.4.md](../reports/puruspe-0.4.4.md); tolerance 1e-12.

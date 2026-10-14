@@ -18,7 +18,7 @@ for character, and runs the patched crate's own test suite.
 
 | Fix | Finding | Upstream base | Status |
 |---|---|---|---|
-| [puruspe/0001-Fix-betai-for-large-a-and-b.patch](puruspe/0001-Fix-betai-for-large-a-and-b.patch) | [001](../findings/001-puruspe-betai.md) | puruspe 0.4.4 = `main` at `f3eb94b` | ready, not submitted |
+| [puruspe/0001-Fix-betai-for-large-a-and-b.patch](puruspe/0001-Fix-betai-for-large-a-and-b.patch) | [001](../findings/001-puruspe-betai.md) | puruspe 0.4.4 = `main` at `f3eb94b` | ready; submission approved by owner (2026-10-14), not yet submitted |
 
 ## Notes for submission (puruspe)
 
