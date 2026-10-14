@@ -13,24 +13,19 @@ _Updated at the end of every session. Start here._
   CI jobs `coverage` (minimum 90% of lines), `guardrails`, `mutants` (PR diff: no
   surviving mutants unless excluded with a reason; weekly: at least 95%); weekly
   workflow; SessionStart hook. See `docs/guardrails.md`.
+- **Milestone 2** (reproduce the pilot findings), one PR per function family:
+  1. **erfc** ([PR #3](https://github.com/traderhall757-arch/rust-sci-verify/pull/3)): statrs `erfc`, finding 004 (low: about 10 digits; 111 of 281 points); new `check-statrs` crate; harness `Expected` lists all points of a finding.
+  2. **gamma** ([PR #4](https://github.com/traderhall757-arch/rust-sci-verify/pull/4)): statrs `gamma`, finding 003 (high: finite at poles, early overflow; 187 of 901 points).
+  3. **gammainc** ([PR #5](https://github.com/traderhall757-arch/rust-sci-verify/pull/5)): puruspe `gammp`, finding 002 (medium: NaN for a >= 100; 78 of 192 points); tolerance 1e-12. Also the CI fix: the `mutants` job passes when changed code has nothing to mutate.
+  4. **betainc** ([PR #6](https://github.com/traderhall757-arch/rust-sci-verify/pull/6)): puruspe `betai`, finding 001 (high: 0 instead of 0.5 at a = b = 1e4; 336 of 639 points); tolerance 1e-12.
+  5. **kv** (last PR): puruspe `Kn` is right where SciPy is wrong: K_100(0.0631) = inf in SciPy, 5.92e305 in mpmath and puruspe; 8 "SciPy wrong" points, no finding.
 
-## In progress: Milestone 2 (reproduce the pilot findings)
-
-Split into one pull request per function family (CLAUDE.md rule 1), merged in
-this order:
-
-  1. **erfc** (merged): statrs `erfc` (finding 004, low: about 10 digits; 111 of 281 points); new `check-statrs` crate; harness `Expected` lists all points of a finding.
-  2. **gamma** (merged): statrs `gamma` (finding 003, high: finite at poles, early overflow; 187 of 901 points).
-  3. **gammainc** (merged): puruspe `gammp` (finding 002, medium: NaN for a >= 100; 78 of 192 points); tolerance 1e-12.
-  4. **betainc** (merged): puruspe `betai` (finding 001, high: 0 instead of 0.5 at a = b = 1e4; 336 of 639 points); tolerance 1e-12.
-  5. **kv** (this PR): puruspe `Kn` vs the SciPy false alarm K_100(0.0631) = inf (SciPy wrong, crate right); no finding.
-
-All four findings are **approved by owner** (2026-10-14); none is reported
-upstream (that needs a separate approval per report).
+  All four findings are **approved by owner** (2026-10-14); none is reported
+  upstream (that needs a separate approval per report).
 
 ## Next
 
-1. Owner merges the last Milestone 2 PR.
+1. Owner merges the last Milestone 2 PR (kv). Milestone 2 is then complete; start a fresh session.
 2. Owner sets up the `main` ruleset requiring the CI checks (if not done yet).
 3. **Milestone 3** in a fresh session: diagnose `puruspe::betai` (root cause and a
    minimal, tested, fork-ready fix; not submitted). Leads are in finding 001.
