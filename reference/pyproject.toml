@@ -1,0 +1,26 @@
+[project]
+name = "rsv-reference"
+version = "0.1.0"
+description = "Reference-value generator for rust-sci-verify (mpmath arbiter, SciPy practical reference)"
+license = "MIT OR Apache-2.0"
+requires-python = "==3.13.*"
+# Exact pins: changing any of these changes the reference data, so bumps go
+# through a normal pull request that also regenerates reference/data/.
+dependencies = [
+    "mpmath==1.4.1",
+    "numpy==2.5.4",
+    "scipy==1.18.1",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.17.0"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
