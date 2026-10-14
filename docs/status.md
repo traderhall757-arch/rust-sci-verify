@@ -71,16 +71,36 @@ _Updated at the end of every session. Start here._
     worst is 5.0e-14 and 2.6e-11.
   - `puruspe::Yn` passes both (worst 3.4e-14 and 5.5e-11).
   - `puruspe::Jnu_Ynu` fails 29 points: **finding 005**, approved by owner (2026-10-14). It panics
-    for x >= nu + 9845 (Numerical Recipes' continued fraction hits its
+    for x above about nu + 9832 (Numerical Recipes' continued fraction hits its
     10,000-iteration cap) and loses accuracy as x grows (1.4e-9 at
     Y_500(1e4); up to 4e-7 off the grid).
 
+- **Milestone 4, part 2: `jv`** (Bessel J; PR pending):
+  - Datasets `jv` and `jv_large`: the `yv` grids and tolerances (1e-13 and
+    5e-10, from the condition number |x J'/J|, tested). SciPy returns 0 for
+    J_200(5) = 4.8e-296 ("SciPy wrong"); its worst on `jv_large` is 2.0e-10.
+  - `puruspe::Jn` fails 27 points: **finding 006** (high), approved by
+    Claude after the checklist. Wherever the true J_n(x) underflows (x well
+    below n) it returns inf or an arbitrary number (J_500(1) = 0.0046,
+    J_500(20) = 1.8e90). Root cause: puruspe's `ldexp` returns infinity
+    instead of 0 on underflow; confirmed by swapping in a correct `ldexp`.
+    Accurate where J is a normal double.
+  - `puruspe::Jnu_Ynu`'s J result fails 55 points: finding 005 extended
+    (approved by Claude after the checklist): the same panics, NaN where J
+    underflows (19 points), accuracy loss up to 8.9e-13 on `jv`, 1.9e-8 at
+    J_200(1e4), 1.3e-9 off the grid for non-integer orders at small x.
+  - Correction to finding 005: the panic boundary is not exactly
+    x = nu + 9845; panics start near nu + 9832 and alternate with values up
+    to about nu + 9851.
+
 ## Next
 
-1. **Milestone 4, continued** (next session): next Bessel family, e.g. `jv`
-   (puruspe `Jn` and the J result of `Jnu_Ynu`), then `iv`; non-integer
-   orders need their own dataset (the current ones are integer-order so
-   `Yn`/`Kn` can use them). Rest of Milestone 4 per the roadmap: statrs
+1. **Milestone 4, continued** (next session): `iv` (puruspe `In` and the I
+   result of `Inu_Knu`). `In` uses the same rescaling with the same broken
+   `ldexp` as `Jn`, so expect finding 006's bug where I_n(x) underflows
+   (check it, don't assume it). Non-integer orders need their own dataset
+   (the current ones are integer-order so `Jn`/`Yn`/`Kn` can use them);
+   finding 005 already shows `Jnu_Ynu` is worse there. Rest of Milestone 4 per the roadmap: statrs
    distributions, the `special` crate, statrs hypothesis tests.
 2. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
@@ -90,6 +110,7 @@ _Updated at the end of every session. Start here._
 ## Decisions recorded (owner, 2026-10-14)
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
+  Finding 006 and the J part of 005 approved by Claude (checklist).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -126,7 +147,7 @@ _Updated at the end of every session. Start here._
 - Under the error metric, a subnormal result flushed to zero is wrong (relative
   to the smallest normal double). SciPy does this for erfc(26.75), erfc(27.0)
   and gammainc(200, 2).
-- `yv` and `yv_large` take about 10 s together. The `yv` grids leave out
+- `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);
   `betainc_switch` about 30 s. Its grid leaves out a = 1e5 with x = 1 - 1e-4,
