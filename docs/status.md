@@ -93,7 +93,7 @@ _Updated at the end of every session. Start here._
     x = nu + 9845; panics start near nu + 9832 and alternate with values up
     to about nu + 9851.
 
-- **Milestone 4, part 3: `iv`** (modified Bessel I; [PR #15](https://github.com/traderhall757-arch/rust-sci-verify/pull/15), open):
+- **Milestone 4, part 3: `iv`** (modified Bessel I; [PR #15](https://github.com/traderhall757-arch/rust-sci-verify/pull/15), merged):
   - Datasets `iv` (the `yv` grid, 1e-13), `iv_large` (integer orders,
     x = 50..1000 across the overflow edge, 17 `overflow` tags, 2e-13) and
     `iv_nonint` (orders 0.25..200.75, x = 1e-5..700, 2e-13); tolerances from
@@ -111,7 +111,7 @@ _Updated at the end of every session. Start here._
     fractional order.
 
 - **Milestone 4, part 4: standard normal distribution** (statrs `Normal`;
-  [PR #16](https://github.com/traderhall757-arch/rust-sci-verify/pull/16), open):
+  [PR #16](https://github.com/traderhall757-arch/rust-sci-verify/pull/16), merged):
   - Datasets `norm_cdf` and `norm_sf` (441 points each: x = -40..40 step 0.25
     plus decades, tolerance 4e-13 from the condition number |x phi/Phi|,
     which reaches 1408 at x = -37.5; tested) and `norm_ppf` (138 points, both
@@ -127,13 +127,44 @@ _Updated at the end of every session. Start here._
     pass every grid point and a 20,000-point random scan.
   - Only mean 0, sd 1 is checked; other parameters use the same `erfc` call.
 
+- **Milestone 4, part 5: Student's t distribution** (statrs `StudentsT`;
+  PR from branch `claude/eloquent-einstein-7aly2r`, open):
+  - Datasets `t_cdf` and `t_sf` (1007 points each: 19 df from 0.1 to 1e8 x
+    53 x from -1e300 to 1e300) and `t_ppf` (513 points: the same df x 27 p
+    from 5e-324 to 1 - 1e-15; p = 0, 1 tagged `pole`, 7 `overflow`). All
+    tolerances 2e-13: cdf/sf from the condition number |x f/F| (worst 901 at
+    df = 1e8, x = -30), ppf from |log|x|| (worst 689.6); both tested. The
+    reference is a new continued fraction for I_x(a, 1/2) (`_mp_betainc_cf`,
+    DLMF 8.17.22), because `mpmath.betainc` fails to converge for df >= 1e5;
+    tested against the series, `mpmath.betainc`, closed forms for df = 1, 2,
+    3, and the 2F1 form at 300 digits. SciPy is wrong at 5 cdf, 5 sf and 36
+    ppf points (e.g. it returns 0 at p = 1/2 +- 1e-10 for df = 4).
+  - `StudentsT::cdf` and `sf` fail 144 points each: **finding 010** (high),
+    approved by Claude after the checklist. 0 for |x| > 1.34e154 (x^2
+    overflows), exactly 0.5 for x^2/df below about 1e-15 (1 - h formed from a
+    rounded h, and a 1e-15 cut-off in `beta_reg`), and errors growing with df
+    (8.9e-8 at df = 1e8 on the grid, 4.3e-4 off it). All causes confirmed
+    with a switchable copy of `beta_reg`.
+  - `StudentsT::inverse_cdf` fails 219 points: **finding 011** (high),
+    approved by Claude after the checklist. It **never returns** at 23 points
+    (every p for df = 1e8: the Newton step's density overflows to inf and
+    AS 109's step-shrinking loop has no limit), panics for p < 7.4e-163,
+    cuts tails off near 1e8 (-9.2e7 for -3.2e19), returns sqrt(df 2^-53)
+    near p = 1/2, and is off by up to 67% for large df (AS R83's absolute
+    stopping rule).
+  - Harness: new `Check::run_with_time_limit` and `Outcome::Timeout` ("no
+    result within N s", always crate wrong; `docs/conventions.md`), so an
+    endless loop in a crate cannot hang CI. `t_ppf` uses a 5 s limit.
+
 ## Next
 
 1. **Milestone 4, continued** (next session): more statrs distributions
    (CDF/SF/PPF vs `scipy.stats`), one family per PR. Suggested order:
-   Student's t, chi-squared and gamma (they exercise statrs's incomplete
-   gamma and beta, so expect overlap with findings 001 to 003 style issues),
-   then the `special` crate, then statrs hypothesis tests. Optional small
+   chi-squared and gamma (statrs's incomplete gamma; expect finding 002/003
+   style issues; the quantiles may share `inv_beta_reg`-like Newton code, so
+   use `run_with_time_limit` from the start), then the `special` crate (its
+   `inv_inc_beta` is the source of statrs's `inv_beta_reg`, finding 011),
+   then statrs hypothesis tests. Optional small
    follow-up: check the K result of `Inu_Knu` on the `kv` grid (not yet
    checked; same code path as finding 008).
 2. Nothing is submitted upstream until the whole project is done and tested
@@ -145,7 +176,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007, 008 and 009 likewise.
+  007, 008, 009, 010 and 011 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -182,6 +213,9 @@ _Updated at the end of every session. Start here._
 - Under the error metric, a subnormal result flushed to zero is wrong (relative
   to the smallest normal double). SciPy does this for erfc(26.75), erfc(27.0)
   and gammainc(200, 2).
+- `t_ppf` takes about 3 minutes to generate (bisection plus Newton on the
+  continued fraction, at 50 and 100 digits) and `t_cdf` + `t_sf` about
+  7 s; a full regeneration now takes about 6 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);

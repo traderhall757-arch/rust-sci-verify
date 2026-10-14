@@ -5,7 +5,9 @@ dataset's mpmath function is compared here with a different method (an exact
 identity, a finite sum, or a different mpmath function) where both are valid.
 """
 
+import json
 import math
+from pathlib import Path
 
 import mpmath
 import pytest
@@ -444,3 +446,171 @@ def test_norm_cdf_underflows_where_the_grid_description_says():
         assert cdf(mpmath.mpf(-38.48)) > mpmath.mpf(2) ** -1075 > cdf(mpmath.mpf(-38.50))
         assert functions._mp_norm_sf(mpmath.mpf(8.28)) > mpmath.mpf(2) ** -54
         assert functions._mp_norm_sf(mpmath.mpf(8.30)) < mpmath.mpf(2) ** -54
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "x"),
+    [(0.5, 0.5, 0.3), (2.0, 0.5, 0.9), (0.5, 50.0, 0.01), (25.0, 0.5, 0.97), (5000.0, 0.5, 0.9999)],
+)
+def test_betainc_continued_fraction_matches_series_and_mpmath(a, b, x):
+    # Both branches (direct and complement) of the continued fraction against
+    # the positive-term series used for betainc and against mpmath.betainc.
+    with mpmath.workdps(50):
+        a, b, x = mp(a, b, x)
+        cf = functions._mp_betainc_cf(a, b, x)
+        assert close(cf, functions._mp_betainc(a, b, x))
+        assert close(cf, mpmath.betainc(a, b, 0, x, regularized=True), digits=35)
+
+
+@pytest.mark.parametrize(
+    "x", [-1e300, -1e5, -40.0, -3.0, -0.5, -1e-10, 0.0, 1e-300, 0.25, 7.5, 1e20]
+)
+def test_t_cdf_matches_closed_forms_for_df_1_2_3(x):
+    # A&S 26.7.3 / 26.7.4 for df = 1 (Cauchy), 2 and 3, written for x < 0
+    # without cancellation; the upper half follows from F(x) = 1 - F(-x).
+    #   df = 1: F(x) = atan(-1/x) / pi
+    #   df = 2: F(x) = 1 / (s (s - x)) with s = sqrt(2 + x^2)
+    #   df = 3: F(x) = (2 phi - sin 2 phi) / (2 pi), phi = atan(-sqrt(3) / x)
+    with mpmath.workdps(60):
+        (x,) = mp(x)
+        lower = -abs(x)
+        if lower == 0:
+            exact = {1: mpmath.mpf(1) / 2, 2: mpmath.mpf(1) / 2, 3: mpmath.mpf(1) / 2}
+        else:
+            s = mpmath.sqrt(2 + lower * lower)
+            phi = mpmath.atan(-mpmath.sqrt(3) / lower)
+            exact = {
+                1: mpmath.atan(-1 / lower) / mpmath.pi,
+                2: 1 / (s * (s - lower)),
+                3: (2 * phi - mpmath.sin(2 * phi)) / (2 * mpmath.pi),
+            }
+        for df, tail in exact.items():
+            if df == 3 and abs(x) > 1e5:
+                continue  # 2 phi - sin 2 phi cancels beyond 60 digits
+            want = tail if x <= 0 else 1 - tail
+            assert close(functions._mp_t_cdf(mpmath.mpf(df), x), want), df
+
+
+@pytest.mark.parametrize(
+    ("df", "x"),
+    [
+        (0.1, -40.0),
+        (0.5, 0.25),
+        (2.5, -3.0),
+        (7.5, -1.5),
+        (50.0, 2.0),
+        (1e8, -3.0),
+        (1e8, -30.0),
+        (1e5, -20.0),
+    ],
+)
+def test_t_cdf_matches_hypergeometric_series(df, x):
+    # F(x) = 1/2 + x Gamma((df+1)/2) / (sqrt(pi df) Gamma(df/2))
+    #        * 2F1(1/2, (df+1)/2; 3/2; -x^2/df)                      (A&S 26.7.1 integrated)
+    # a different mpmath algorithm (hyp2f1 with its transformations). 1/2 + ...
+    # cancels to F, which is 4.9e-198 at (1e8, -30), so it runs at 300 digits.
+    with mpmath.workdps(300):
+        df, x = mp(df, x)
+        c = mpmath.gamma((df + 1) / 2) / (mpmath.sqrt(mpmath.pi * df) * mpmath.gamma(df / 2))
+        route = mpmath.mpf(1) / 2 + x * c * mpmath.hyp2f1(0.5, (df + 1) / 2, 1.5, -x * x / df)
+    with mpmath.workdps(50):
+        assert close(functions._mp_t_cdf(df, x), route)
+
+
+@pytest.mark.parametrize(
+    ("df", "x"), [(1e4, -30.0), (1e3, -40.0), (1e6, -1e3), (10.0, -1e5), (0.5, -1e300)]
+)
+def test_t_lower_tail_matches_beta_series_in_the_deep_tails(df, x):
+    # The continued fraction against the positive-term series DLMF 8.17.8
+    # (_mp_betainc, itself tested above) at h = df / (df + x^2). The series
+    # needs about 1 / (1 - h) terms, so it is used only where h is not near 1.
+    with mpmath.workdps(50):
+        df, x = mp(df, x)
+        series = functions._mp_betainc(df / 2, mpmath.mpf(1) / 2, df / (df + x * x)) / 2
+        assert close(functions._mp_t_lower_tail(df, x), series)
+
+
+def test_t_cdf_and_sf_sum_to_one_and_mirror():
+    with mpmath.workdps(50):
+        for df in mp(0.1, 3.0, 1e8):
+            for x in mp(-1e300, -2.0, 0.0, 1e-10, 40.0):
+                assert close(functions._mp_t_cdf(df, x) + functions._mp_t_sf(df, x), 1)
+                assert functions._mp_t_sf(df, x) == functions._mp_t_cdf(df, -x)
+
+
+@pytest.mark.parametrize(
+    ("df", "p"),
+    [
+        (0.1, 1e-20),
+        (0.5, 0.4999999999),
+        (2.5, 5e-324),
+        (10.0, 0.05),
+        (1e3, 1e-100),
+        (1e8, 0.25),
+        (1e8, 0.999),
+    ],
+)
+def test_t_ppf_inverts_the_cdf(df, p):
+    # F(ppf(p)) = p to far beyond double precision (relative to min(p, 1 - p)).
+    with mpmath.workdps(50):
+        df, p = mp(df, p)
+        x = functions._mp_t_ppf(df, p)
+        if p < 0.5:
+            assert close(functions._mp_t_cdf(df, x), p)
+        else:
+            assert close(functions._mp_t_sf(df, x), 1 - p)
+
+
+@pytest.mark.parametrize("p", [1e-300, 1e-10, 0.25, 0.5 - 1e-10, 0.5, 0.75, 1 - 1e-15])
+def test_t_ppf_matches_closed_forms_for_df_1_and_2(p):
+    # df = 1: tan(pi (p - 1/2)); df = 2: (2p - 1) / sqrt(2 p (1 - p)) (A&S 26.7.1 inverted).
+    # p - 1/2 and 1 - p are exact for the double p at 60 digits.
+    with mpmath.workdps(60):
+        (p,) = mp(p)
+        cauchy = -1 / mpmath.tan(mpmath.pi * p) if p < 0.25 else mpmath.tan(mpmath.pi * (p - 0.5))
+        two = (2 * p - 1) / mpmath.sqrt(2 * p * (1 - p))
+        for df, want in ((1, cauchy), (2, two)):
+            got = functions._mp_t_ppf(mpmath.mpf(df), p)
+            assert got == want == 0 if p == 0.5 else close(got, want, digits=40)
+
+
+def test_t_ppf_poles_are_tagged_by_rule():
+    assert functions._t_ppf_tags(3.0, 0.0) == [POLE]
+    assert functions._t_ppf_tags(3.0, 1.0) == [POLE]
+    assert functions._t_ppf_tags(3.0, 5e-324) == []
+    assert functions._t_ppf_tags(3.0, 1 - 2.0**-53) == []
+
+
+@pytest.mark.parametrize("spec", [functions.T_CDF, functions.T_SF])
+def test_t_condition_numbers_match_the_tolerance_reasons(spec):
+    # The largest |x f / F| at a normal, nonzero point of the grid (the lower
+    # tail of the cdf, mirrored for the sf), at df = 1e8, x = -30.
+    sign = 1 if spec is functions.T_CDF else -1
+    with mpmath.workdps(30):
+        worst, where = max(
+            (functions.t_cdf_condition(df, sign * x), (df, sign * x))
+            for df, x in spec.grid()
+            if spec.mpmath_fn(mpmath.mpf(df), mpmath.mpf(x)) >= mpmath.mpf(2) ** -1022
+        )
+    assert 900 < worst < 902
+    assert where == (1e8, -30.0)
+    # 2e-13 is 2x the 1.0e-13 bound to two digits (2 * 901 * 2^-53 = 2.0006e-13).
+    assert spec.tolerance >= 1.99 * worst * 2.0**-53
+
+
+def test_t_ppf_log_magnitude_matches_the_tolerance_reason():
+    # The largest |log|x|| at a finite, normal quantile of the committed data
+    # (df = 1, p = 1e-300), against the tolerance's 2 |L| 2^-53 bound.
+    data = Path(__file__).resolve().parent.parent / "data" / "t_ppf.jsonl"
+    rows = [json.loads(line) for line in data.read_text().splitlines()[1:]]
+    logs = [
+        (abs(math.log(abs(y))), r["in"]["df"][0], r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags")
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= abs(y) < math.inf
+    ]
+    worst, df, p = max(logs)
+    assert (df, p) == (1.0, 1e-300)
+    assert 689.6 < worst < 689.7
+    assert functions.T_PPF.tolerance >= 2 * worst * 2.0**-53

@@ -59,6 +59,17 @@ Any **finite** value at a pole or overflow point is **crate wrong**. Example:
 statrs `gamma(-6.0)` returning `5.94e12` is a finding, not a convention. A
 **panic** is never accepted: it is always crate wrong.
 
+### Calls that never return
+
+A check whose crate function is known to loop forever at some inputs runs with
+`Check::run_with_time_limit`: every point runs on its own thread, and a point
+with no result when the limit (counted from the start of the check) expires
+gets the outcome "no result within N s". Like a panic, that is always crate
+wrong. The limit is far above the time a correct call takes (check-statrs uses
+5 s for calls that take microseconds), so it only separates an endless loop
+from a slow machine. Abandoned threads run until the test process exits, so
+such a check comes last in its test.
+
 ## Expected failures
 
 A crate-wrong point does not fail CI only if the check crate lists it as an
