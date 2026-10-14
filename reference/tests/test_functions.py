@@ -614,3 +614,166 @@ def test_t_ppf_log_magnitude_matches_the_tolerance_reason():
     assert (df, p) == (1.0, 1e-300)
     assert 689.6 < worst < 689.7
     assert functions.T_PPF.tolerance >= 2 * worst * 2.0**-53
+
+
+@pytest.mark.parametrize(
+    ("a", "x"),
+    [
+        (0.01, 1e-5),
+        (0.01, 0.5),
+        (0.5, 0.3),
+        (1.5, 2.0),
+        (3.0, 10.0),
+        (20.0, 20.5),
+        (100.0, 90.0),
+        (100.0, 130.0),
+        (1000.0, 500.0),
+        (1000.0, 1948.6832980505137),
+        (0.1, 750.0),
+    ],
+)
+def test_gamma_cdf_and_sf_match_mpmath_gammainc(a, x):
+    # Both routes (series below a + 1, continued fraction above) against
+    # mpmath's own hypergeometric evaluation, where that converges.
+    with mpmath.workdps(50):
+        a, x = mp(a, x)
+        assert close(functions._mp_gamma_cdf(a, x), mpmath.gammainc(a, 0, x, regularized=True))
+        assert close(
+            functions._mp_gamma_sf(a, x), mpmath.gammainc(a, x, mpmath.inf, regularized=True)
+        )
+
+
+@pytest.mark.parametrize(
+    ("a", "x"),
+    [(1, 1e-10), (2, 0.5), (5, 750.0), (1000, 970.0), (10**5, 99000.0), (10**6, 990000.0)],
+)
+def test_gamma_cdf_matches_finite_sum_for_integer_a(a, x):
+    # Q(a, x) = e^-x sum_{k<a} x^k / k! (DLMF 8.4.10), a different method that
+    # also reaches a = 1e6, where mpmath.gammainc does not converge and SciPy
+    # is 2.1e-10 off (P = 5.4e-24 at x = 990000). P = 1 - Q cancels to P, so
+    # the sum runs with 60 digits more than P's magnitude needs.
+    xm = mpmath.mpf(x)
+    with mpmath.workdps(110):
+        term = total = mpmath.mpf(1)
+        for k in range(1, a):
+            term *= xm / k
+            total += term
+        q = mpmath.exp(-xm) * total
+        p = 1 - q
+    with mpmath.workdps(50):
+        assert close(functions._mp_gamma_sf(mpmath.mpf(a), xm), q)
+        assert close(functions._mp_gamma_cdf(mpmath.mpf(a), xm), p)
+
+
+@pytest.mark.parametrize("x", [1e-300, 1e-10, 0.3, 1.0, 2.0, 30.0, 700.0, 1e5])
+def test_gamma_cdf_matches_closed_forms_for_a_one_half_and_one(x):
+    # a = 1/2: P = erf(sqrt x), Q = erfc(sqrt x); a = 1: P = 1 - e^-x, Q = e^-x.
+    with mpmath.workdps(50):
+        (x,) = mp(x)
+        half = mpmath.mpf(1) / 2
+        assert close(functions._mp_gamma_cdf(half, x), mpmath.erf(mpmath.sqrt(x)))
+        assert close(functions._mp_gamma_sf(half, x), mpmath.erfc(mpmath.sqrt(x)))
+        assert close(functions._mp_gamma_cdf(mpmath.mpf(1), x), -mpmath.expm1(-x))
+        assert close(functions._mp_gamma_sf(mpmath.mpf(1), x), mpmath.exp(-x))
+
+
+def test_gamma_cdf_and_sf_sum_to_one_and_cover_the_ends():
+    with mpmath.workdps(50):
+        for a in mp(0.01, 3.0, 1e6):
+            assert functions._mp_gamma_cdf(a, mpmath.mpf(0)) == 0
+            assert functions._mp_gamma_sf(a, mpmath.mpf(0)) == 1
+            for x in mp(1e-300, 0.5, 1e6 - 1, 1e6 + 1, 1e300):
+                total = functions._mp_gamma_cdf(a, x) + functions._mp_gamma_sf(a, x)
+                assert close(total, 1)
+
+
+@pytest.mark.parametrize(
+    ("a", "p"),
+    [
+        (0.01, 1e-3),
+        (0.1, 5e-324),
+        (0.5, 0.4999999999),
+        (3.0, 0.05),
+        (20.0, 1 - 1e-15),
+        (1e3, 1e-100),
+        (1e3, 5e-324),
+        (1e5, 5e-324),
+        (1e6, 1e-10),
+        (1e6, 0.25),
+        (1e6, 0.999),
+    ],
+)
+def test_gamma_ppf_inverts_the_cdf(a, p):
+    # P(ppf(p)) = p, or Q(ppf(p)) = 1 - p in the upper half, far beyond double
+    # precision; includes the points where SciPy is off (p = 5e-324 for
+    # a >= 100, and a = 1e6, p = 1e-10).
+    with mpmath.workdps(50):
+        a, p = mp(a, p)
+        x = functions._mp_gamma_ppf(a, p)
+        if p <= 0.5:
+            assert close(functions._mp_gamma_cdf(a, x), p)
+        else:
+            assert close(functions._mp_gamma_sf(a, x), 1 - p)
+
+
+@pytest.mark.parametrize("p", [1e-300, 1e-10, 0.25, 0.5, 0.75, 1 - 1e-15])
+def test_gamma_ppf_matches_closed_forms_for_a_one_half_and_one(p):
+    # a = 1: x = -log(1 - p); a = 1/2: x = erfinv(p)^2 (p = erf(sqrt x)); in the
+    # upper half x = erfcinv(1 - p)^2, written with erfinv to stay accurate.
+    # 1 - p is exact for the double p at 60 digits.
+    with mpmath.workdps(60):
+        (p,) = mp(p)
+        assert close(functions._mp_gamma_ppf(mpmath.mpf(1), p), -mpmath.log1p(-p))
+        half = functions._mp_gamma_ppf(mpmath.mpf(1) / 2, p)
+        assert close(half, mpmath.erfinv(p) ** 2, digits=35)
+    assert functions._mp_gamma_ppf(mpmath.mpf(3), mpmath.mpf(0)) == 0
+
+
+def test_gamma_ppf_poles_are_tagged_by_rule():
+    assert functions._gamma_ppf_tags(3.0, 1.0) == [POLE]
+    assert functions._gamma_ppf_tags(3.0, 0.0) == []
+    assert functions._gamma_ppf_tags(3.0, 5e-324) == []
+    assert functions._gamma_ppf_tags(3.0, 1 - 2.0**-53) == []
+
+
+@pytest.mark.parametrize(
+    ("spec", "condition", "where"),
+    [
+        (functions.GAMMA_CDF, functions.gamma_cdf_condition, (1e6, 1e6 - 30 * 1e3)),
+        (functions.GAMMA_SF, functions.gamma_sf_condition, (1e6, 1e6 + 30 * 1e3)),
+    ],
+)
+def test_gamma_condition_numbers_match_the_tolerance_reasons(spec, condition, where):
+    # The largest condition number at a normal, nonzero point of the grid is
+    # 3.0e4 at a = 1e6, x = a -+ 30 sqrt(a): what a method that rounds x / a
+    # loses there (3.3e-12) would not fit the tolerance, as the reason says.
+    with mpmath.workdps(30):
+        worst, at = max(
+            (condition(a, x), (a, x))
+            for a, x in spec.grid()
+            if x > 0 and spec.mpmath_fn(mpmath.mpf(a), mpmath.mpf(x)) >= mpmath.mpf(2) ** -1022
+        )
+    assert 3.0e4 < worst < 3.01e4
+    assert at == where
+    assert 3.3e-12 < worst * 2.0**-53 < 3.4e-12
+    assert worst * 2.0**-53 > spec.tolerance
+    # A careful method's k^2 2^-53 at k = 30 fits with room to spare.
+    assert 30**2 * 2.0**-53 < spec.tolerance / 9
+
+
+def test_gamma_ppf_log_magnitude_matches_the_tolerance_reason():
+    # The largest |log x| at a nonzero, normal quantile of the committed data
+    # (a = 0.01, p = 1e-3, x = 5.7e-301), against the tolerance's 2 |L| 2^-53 bound.
+    data = Path(__file__).resolve().parent.parent / "data" / "gamma_ppf.jsonl"
+    rows = [json.loads(line) for line in data.read_text().splitlines()[1:]]
+    logs = [
+        (abs(math.log(y)), r["in"]["a"][0], r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags")
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= y < math.inf
+    ]
+    worst, a, p = max(logs)
+    assert (a, p) == (0.01, 1e-3)
+    assert 691.3 < worst < 691.4
+    assert functions.GAMMA_PPF.tolerance >= 2 * worst * 2.0**-53

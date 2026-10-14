@@ -3,7 +3,7 @@ use std::time::Duration;
 use harness::{Check, Expected, Outcome, finish};
 
 use crate::expected;
-use statrs::distribution::{ContinuousCDF, Normal, StudentsT};
+use statrs::distribution::{ChiSquared, ContinuousCDF, Gamma, Normal, StudentsT};
 use statrs::function::{erf, gamma};
 
 /// The standard normal distribution (the reference data has mean 0, sd 1).
@@ -20,6 +20,21 @@ const TIME_LIMIT: Duration = Duration::from_secs(5);
 /// 0, scale 1).
 fn students_t(df: f64) -> StudentsT {
     StudentsT::new(0.0, 1.0, df).expect("valid parameters")
+}
+
+/// The gamma distribution with shape `a` and rate 1 (the reference data's
+/// parametrisation).
+fn gamma_dist(a: f64) -> Gamma {
+    Gamma::new(a, 1.0).expect("valid parameters")
+}
+
+/// Chi-squared with `df = 2a` degrees of freedom: X is chi-squared(2a) exactly
+/// when X / 2 is gamma(a, rate 1), so the gamma datasets check it at 2x (cdf,
+/// sf) and through half its quantile (ppf). Doubling is exact for every grid
+/// value (none is above 1e300); halving is exact except for the lowest bit of
+/// a subnormal quantile, where errors are judged relative to 2.2e-308 anyway.
+fn chi_squared(a: f64) -> ChiSquared {
+    ChiSquared::new(2.0 * a).expect("valid parameters")
 }
 
 #[test]
@@ -85,6 +100,67 @@ fn statrs_matches_reference() {
             }],
         }
         .run(|p| Outcome::scalar(students_t(p.scalar("df")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Gamma::cdf",
+            dataset: "gamma_cdf",
+            expected: &[Expected {
+                finding: "012-statrs-gamma-cdf",
+                points: expected::GAMMA_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(gamma_dist(p.scalar("a")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Gamma::sf",
+            dataset: "gamma_sf",
+            expected: &[Expected {
+                finding: "012-statrs-gamma-cdf",
+                points: expected::GAMMA_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(gamma_dist(p.scalar("a")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::ChiSquared::cdf",
+            dataset: "gamma_cdf",
+            expected: &[Expected {
+                finding: "012-statrs-gamma-cdf",
+                points: expected::GAMMA_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(chi_squared(p.scalar("a")).cdf(2.0 * p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::ChiSquared::sf",
+            dataset: "gamma_sf",
+            expected: &[Expected {
+                finding: "012-statrs-gamma-cdf",
+                points: expected::GAMMA_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(chi_squared(p.scalar("a")).sf(2.0 * p.scalar("x")))),
+        // Time-limited although no point is known to hang: the series and
+        // continued fraction inside `cdf` have no iteration limit. Before
+        // `t_ppf`, whose abandoned threads would compete for the CPU.
+        Check {
+            function: "statrs::distribution::Gamma::inverse_cdf",
+            dataset: "gamma_ppf",
+            expected: &[Expected {
+                finding: "013-statrs-gamma-inverse-cdf",
+                points: expected::GAMMA_PPF,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| {
+            Outcome::scalar(gamma_dist(p.scalar("a")).inverse_cdf(p.scalar("p")))
+        }),
+        Check {
+            function: "statrs::distribution::ChiSquared::inverse_cdf",
+            dataset: "gamma_ppf",
+            expected: &[Expected {
+                finding: "013-statrs-gamma-inverse-cdf",
+                points: expected::CHI2_PPF,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| {
+            Outcome::scalar(chi_squared(p.scalar("a")).inverse_cdf(p.scalar("p")) / 2.0)
+        }),
         // Last: it loops forever at some points (finding 011), and the
         // abandoned threads keep a CPU busy until the test ends.
         Check {
