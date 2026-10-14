@@ -120,6 +120,13 @@ jobs:
           cargo mutants --in-diff pr.diff --no-shuffle || status=$?
           # 0 = all caught, 2 = some missed, 3 = some timed out; anything else is an error.
           case "$status" in 0|2|3) ;; *) exit "$status" ;; esac
+          if [ "$status" = 0 ] && [ ! -f mutants.out/outcomes.json ]; then
+            # The changed Rust lines contain nothing to mutate (e.g. only test
+            # data); cargo-mutants then succeeds without writing results.
+            echo '## Mutation testing' >> "$GITHUB_STEP_SUMMARY"
+            echo 'The changed Rust code contains no mutable functions.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           rule=0
           python3 scripts/mutation_score.py mutants.out --max-survivors 0 > score.md || rule=$?
           cat score.md >> "$GITHUB_STEP_SUMMARY"
