@@ -69,6 +69,33 @@ def test_gammainc_matches_finite_sum_for_integer_a(a, x):
         assert close(functions._mp_gammainc(*mp(a, x)), exact)
 
 
+@pytest.mark.parametrize(
+    "a, b, x",
+    [(2, 3, 0.3), (1000, 1000, 0.5), (500, 500, 0.49), (10000, 10000, 0.5), (3, 10000, 0.01)],
+)
+def test_betainc_series_matches_binomial_sum_for_integer_a_b(a, b, x):
+    # For integer a, b: I_x(a, b) = sum_{j=a}^{n} C(n, j) x^j (1-x)^(n-j), n = a+b-1
+    # (DLMF 8.17.5). Positive terms, evaluated at 60 digits.
+    with mpmath.workdps(60):
+        xm, n = mpmath.mpf(x), a + b - 1
+        exact = mpmath.fsum(
+            mpmath.binomial(n, j) * xm**j * (1 - xm) ** (n - j) for j in range(a, n + 1)
+        )
+    with mpmath.workdps(50):
+        assert close(functions._mp_betainc(*mp(a, b, x)), exact)
+
+
+@pytest.mark.parametrize(
+    "a, b, x", [(0.1, 0.5, 0.3), (0.5, 0.1, 0.99), (5, 0.1, 0.9), (0.1, 100, 0.01), (10, 2.5, 0.7)]
+)
+def test_betainc_series_matches_mpmath_betainc(a, b, x):
+    # Non-integer parameters, both branches of the symmetry switch.
+    with mpmath.workdps(50):
+        a, b, x = mp(a, b, x)
+        exact = mpmath.betainc(a, b, 0, x, regularized=True)
+        assert close(functions._mp_betainc(a, b, x), exact)
+
+
 def test_grids_have_no_duplicates():
     for spec in functions.ALL:
         grid = list(spec.grid())
