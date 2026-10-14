@@ -111,7 +111,7 @@ _Updated at the end of every session. Start here._
     fractional order.
 
 - **Milestone 4, part 4: standard normal distribution** (statrs `Normal`;
-  PR link in the next section once opened):
+  [PR #16](https://github.com/traderhall757-arch/rust-sci-verify/pull/16), open):
   - Datasets `norm_cdf` and `norm_sf` (441 points each: x = -40..40 step 0.25
     plus decades, tolerance 4e-13 from the condition number |x phi/Phi|,
     which reaches 1408 at x = -37.5; tested) and `norm_ppf` (138 points, both
