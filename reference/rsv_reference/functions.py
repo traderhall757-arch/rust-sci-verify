@@ -1,5 +1,7 @@
 """The registry of reference datasets. One entry per mathematical function."""
 
+import itertools
+
 import mpmath
 import scipy.special as sc
 
@@ -138,4 +140,47 @@ ERFC = Spec(
     scipy_fn=sc.erfc,
 )
 
-ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA)
+
+# --- gammainc --------------------------------------------------------------
+
+_GAMMAINC_A = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0)
+_GAMMAINC_X = (
+    0.0, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0,
+    100.0, 200.0, 500.0, 1000.0, 2000.0,
+)  # fmt: skip
+
+
+def _gammainc_grid() -> list[tuple[float, float]]:
+    # Every a is also an x, so the grid includes x = a, where P is close to
+    # 1/2 and the series / continued-fraction transition lies.
+    return sorted(itertools.product(_GAMMAINC_A, _GAMMAINC_X))
+
+
+def _mp_gammainc(a: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    return mpmath.gammainc(a, 0, x, regularized=True)
+
+
+GAMMAINC = Spec(
+    name="gammainc",
+    description="Regularized lower incomplete gamma function P(a, x) = gamma(a, x) / Gamma(a)",
+    inputs=("a", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "P is the prefix x^a e^-x / Gamma(a + 1) times a well-conditioned series or continued "
+        "fraction. On this grid the logarithms of the prefix's factors reach 1.6e4 in "
+        "magnitude while their sum stays above -745; forming them separately in double "
+        "precision loses up to 1.6e4 * 2^-53 (about 2e-12), and combining them before "
+        "rounding (Temme; Boost) loses far less. 1e-12 demands the careful approach and is "
+        "3x the worst SciPy error on this grid (3.5e-13 at a = 1000, x = 500)"
+    ),
+    grid_description=(
+        "a in {0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000} x "
+        "x in {0, 0.001, 0.01, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000}"
+    ),
+    grid=_gammainc_grid,
+    mpmath_fn=_mp_gammainc,
+    scipy_name="scipy.special.gammainc",
+    scipy_fn=sc.gammainc,
+)
+
+ALL: tuple[Spec, ...] = (ERFCX, ERFC, GAMMA, GAMMAINC)

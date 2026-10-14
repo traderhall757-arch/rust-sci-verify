@@ -4,4 +4,6 @@
 //! `reports/puruspe-<version>.md`.
 
 #[cfg(test)]
+mod expected;
+#[cfg(test)]
 mod verify;
