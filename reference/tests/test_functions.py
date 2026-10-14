@@ -116,3 +116,16 @@ def test_grids_have_no_duplicates():
     for spec in functions.ALL:
         grid = list(spec.grid())
         assert len(grid) == len(set(grid)), spec.name
+
+
+def test_betainc_series_symmetric_point_at_large_parameters():
+    # I_{1/2}(a, a) = 1/2 exactly (symmetry), at the largest parameters of the
+    # betainc_large grid, where the series needs the most terms.
+    with mpmath.workdps(50):
+        assert close(functions._mp_betainc(*mp(1e5, 1e5, 0.5)), mpmath.mpf(0.5))
+
+
+def test_betainc_large_grid_spans_both_tails_above_puruspe_switch():
+    grid = functions._betainc_large_grid()
+    assert len(grid) == 16 * 9
+    assert all(a > 3000 and b > 3000 and 0 < x < 1 for a, b, x in grid)

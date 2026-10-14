@@ -46,6 +46,7 @@ version = "0.1.0"
 dependencies = [
  "harness",
  "puruspe",
+ "puruspe-fix",
 ]
 
 [[package]]
@@ -238,6 +239,13 @@ checksum = "2c9d62b4ad8b456f2ac8a171567bd475cae8cecd53ff5a46fce4f261eef17648"
 dependencies = [
  "lambert_w",
  "num-complex",
+]
+
+[[package]]
+name = "puruspe-fix"
+version = "0.1.0"
+dependencies = [
+ "puruspe",
 ]
 
 [[package]]

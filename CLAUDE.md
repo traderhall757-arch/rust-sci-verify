@@ -32,6 +32,7 @@ cd reference && uv sync -q --locked && uv run -q python -m rsv_reference   # reg
 cd reference && uv run -q pytest -q && uv run -q ruff check . ../scripts && uv run -q ruff format --check . ../scripts
 cd reference && uv run -q pytest -q ../scripts/tests          # guardrail script tests
 python3 scripts/check_orphans.py && python3 scripts/check_api_tests.py && python3 scripts/check_pins.py && cargo machete
+python3 scripts/check_fixes.py --run-tests                # fix crates equal their patches
 ```
 Guardrails are explained in `docs/guardrails.md`.
 Never print whole data files or CI logs; query data with scripts, tail/grep logs.
@@ -40,6 +41,8 @@ Mutation testing runs in CI; locally only on the single function being fixed.
 ## Layout
 - `crates/harness`: shared library (data loading, classification, reports).
 - `crates/check-<crate>`: one crate per verified target crate (pins its version).
+- `crates/<crate>-fix`: a fix for a target crate, verbatim copy of `fixes/<crate>/*.patch`.
 - `reference/`: pinned Python generator; data in `reference/data/<function>.jsonl`.
 - `scripts/`: guardrails and weekly-job helpers (tested in `scripts/tests/`).
-- `reports/`, `findings/`, `docs/` (status, roadmap, conventions, data-format, guardrails).
+- `reports/`, `findings/`, `fixes/` (upstream-ready patches), `docs/` (status, roadmap,
+  conventions, data-format, guardrails).
