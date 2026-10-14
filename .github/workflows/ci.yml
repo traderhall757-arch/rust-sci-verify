@@ -50,9 +50,72 @@ jobs:
         with:
           version: "0.11.32"
       - run: uv sync -q --locked
-      - run: uv run -q ruff check .
-      - run: uv run -q ruff format --check .
+      - run: uv run -q ruff check . ../scripts
+      - run: uv run -q ruff format --check . ../scripts
       - run: uv run -q pytest -q
       - run: uv run -q python -m rsv_reference
       - name: Committed data matches a fresh regeneration
         run: git diff --exit-code --stat -- data/
+
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      - name: Line coverage at least 90%
+        run: |
+          cargo llvm-cov -q --workspace --locked --summary-only --fail-under-lines 90 | tee coverage.txt
+          { echo '## Coverage'; echo '```'; tail -n 12 coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  guardrails:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - name: Guardrail scripts are themselves tested
+        working-directory: reference
+        run: uv sync -q --locked && uv run -q pytest -q ../scripts/tests
+      - name: No orphan .rs files (compared with compiler dep-info)
+        run: python3 scripts/check_orphans.py
+      - name: Every public function has a reference test
+        run: python3 scripts/check_api_tests.py
+      - name: No unused dependencies
+        run: cargo machete
+      - name: Versions are pinned
+        run: python3 scripts/check_pins.py
+
+  mutants:
+    # Report-only until the owner sets a minimum score (see docs/status.md).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - name: Mutation testing on changed code
+        run: |
+          git diff "origin/${{ github.base_ref }}...HEAD" -- '*.rs' > pr.diff
+          if [ ! -s pr.diff ]; then
+            echo '## Mutation testing' >> "$GITHUB_STEP_SUMMARY"
+            echo 'No Rust code changed in this pull request.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          status=0
+          cargo mutants --in-diff pr.diff --no-shuffle || status=$?
+          # 0 = all caught, 2 = some missed, 3 = some timed out; anything else is an error.
+          case "$status" in 0|2|3) ;; *) exit "$status" ;; esac
+          python3 scripts/mutation_score.py mutants.out >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/mutation_score.py mutants.out | head -n 3

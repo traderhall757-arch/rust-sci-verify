@@ -28,7 +28,14 @@ cargo fmt --all --check
 cargo clippy -q --all-targets --locked -- -D warnings
 cargo test -q --locked
 cd reference && uv sync --locked && uv run python -m rsv_reference && git diff --stat
+python3 scripts/check_orphans.py && python3 scripts/check_api_tests.py && python3 scripts/check_pins.py
 ```
+
+CI also runs coverage (at least 90% of lines), `cargo machete`, and mutation
+testing on the changed code. See [docs/guardrails.md](docs/guardrails.md).
+
+Cloud sessions of Claude Code run `.claude/hooks/session-start.sh`, which
+installs the pinned Python environment and fetches Rust dependencies.
 
 `cargo test` rewrites `reports/*.md`; commit them with your change.
 
