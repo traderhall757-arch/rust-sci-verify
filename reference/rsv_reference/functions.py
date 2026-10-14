@@ -470,7 +470,63 @@ YV_LARGE = Spec(
     scipy_fn=sc.yv,
 )
 
+
+# --- jv --------------------------------------------------------------------
+
+# The same grids as yv (integer orders), so J and Y are checked at the same points.
+
+
+def jv_condition(nu: float, x: float) -> mpmath.mpf:
+    """|x J_nu'(x) / J_nu(x)|: the relative change of J per relative change of x."""
+    return abs(x * mpmath.besselj(nu, x, derivative=1) / mpmath.besselj(nu, x))
+
+
+JV = Spec(
+    name="jv",
+    description="Bessel function of the first kind J_nu(x), integer order, x <= 20",
+    inputs=("nu", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "Rounding a quantity proportional to x to a double changes J by the condition number "
+        "|x J'/J| times 2^-53. On this grid the condition number is at most 200 (about nu for "
+        "small x), so up to 2.2e-14 is unavoidable; 1e-13 allows that plus a few ulps of "
+        "further arithmetic, as for yv. Results below 2.2e-308 are judged relative to that "
+        "number (conventions), so the underflowed J_500(1e-10) etc. need no special rule"
+    ),
+    grid_description=(
+        "nu in {0, 1, 2, 5, 10, 20, 50, 100, 200, 500} x x in {1e-10, 1e-5, 1e-3, 0.01, 0.1, "
+        "0.25, 0.5, 1, 2, 5, 10, 20} (the yv grid); J underflows to 0 for large nu at small x"
+    ),
+    grid=_yv_grid,
+    mpmath_fn=mpmath.besselj,
+    scipy_name="scipy.special.jv",
+    scipy_fn=sc.jv,
+)
+
+JV_LARGE = Spec(
+    name="jv_large",
+    description="Bessel function of the first kind J_nu(x), integer order, x from 50 to 1e6",
+    inputs=("nu", "x"),
+    tolerance=5e-10,
+    tolerance_reason=(
+        "For large x, J oscillates with phase about x - (2 nu + 1) pi / 4, which cannot be "
+        "held exactly in a double: rounding it costs the condition number |x J'/J| times "
+        "2^-53. The condition number grows like x and reaches 2.2e6 on this grid (nu = 0, "
+        "x = 1e6), so up to 2.4e-10 is unavoidable for a method that rounds the phase; 5e-10 "
+        "allows 2x that, the same as yv_large; SciPy's worst on this grid is 2.0e-10 (nu = "
+        "200, x = 1e4). It is loose for the smaller x here: the report shows each error"
+    ),
+    grid_description=(
+        "nu in {0, 1, 2, 5, 10, 20, 50, 100, 200, 500} x x in {50, 100, 200, 500, 1e3, 1e4, "
+        "1e5, 1e6} (the yv_large grid)"
+    ),
+    grid=_yv_large_grid,
+    mpmath_fn=mpmath.besselj,
+    scipy_name="scipy.special.jv",
+    scipy_fn=sc.jv,
+)
+
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
-    YV_LARGE,
+    YV_LARGE, JV, JV_LARGE,
 )  # fmt: skip
