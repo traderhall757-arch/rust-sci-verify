@@ -120,12 +120,43 @@ No wrong answers remain; every remaining failure is bug 4 and is listed in
 `FIX_BETAI` and `FIX_BETAI_LARGE` in `crates/check-puruspe/src/expected.rs`.
 **Trade-off of fix 3.** Points with small b and x close to 1 now take the
 `1 - (...)` branch, which loses accuracy when the result is small. On
-`betainc`, 41 points get worse by more than 1.5x (27 get better); the worst is
-(100, 0.1, 0.99), from 1.3e-11 to 5.15e-10, now the fix's worst point. All stay
-below the error that bug 4 already causes elsewhere (5.7e-10 before the fix),
-and below 6e-10, which CI enforces. A choice that avoids this would follow
-Boost (compute whichever of I and 1 - I is smaller), which is beyond a
-minimal fix.
+`betainc`, 41 points get worse by more than 1.5x (27 get better); the worst on
+that grid is (100, 0.1, 0.99), from 1.3e-11 to 5.15e-10.
+
+**Random spot-check (2026-10-14, before submission): the trade-off is larger
+than the grid showed.** 5,000 random points (a, b log-uniform in 1e-2..1e5;
+x uniform, near the mean, or within 1e-6 of 0 or 1), original and fixed code
+compared with SciPy, every disagreement re-checked with mpmath at 50 and 100
+digits:
+
+- Wrong answers (relative error > 1e-6): 511 with puruspe 0.4.4, 2 with the
+  fix. Both remaining ones are the prefactor floor (bug 4) at extreme
+  parameters, (30389, 8425, 0.699) and (58131, 25112, 0.642), error 1.2e-6 and
+  1.1e-6 on values near 1e-302 and 1e-256 that 0.4.4 returned as 0. Two more
+  flagged points were SciPy's errors (it returns 0 or is 3e-6 off near 1e-292;
+  puruspe is right).
+- **Regression from fix 3: 38 points get more than 10x worse, up to 1.8e-8**
+  (vs 2.4e-10 before), all with b < 0.06 and the result I between 0.003 and
+  0.02. Worst, against mpmath:
+
+  | (a, b, x) | 0.4.4 error | fixed error |
+  |---|---|---|
+  | (73256.2, 0.01866, 0.9999945374) | 2.4e-10 | 1.8e-8 |
+  | (58386.6, 0.01965, 0.9999866779) | 1.1e-10 | 1.5e-8 |
+  | (97698.9, 0.0166, 0.9999973151) | 1.8e-10 | 1.0e-8 |
+  | (7457.77, 0.02365, 0.9998657733) | 3.2e-11 | 5.9e-9 |
+  | (15.766, 0.01229, 0.9565398173) | 1.8e-11 | 3.7e-9 |
+
+  Cause: for tiny b the switch point (a+1)/(a+b+2) is close to 1, so these x
+  use 1 - I_{1-x}(b, a) with I_{1-x}(b, a) around 0.99; the subtraction
+  magnifies the prefactor's error about 100-fold. The grid had no b below 0.1,
+  so CI did not see it.
+
+**Consequence:** the patch is **not submitted**. Its description understates
+the trade-off, and fix 3 makes some previously accurate results worse. Next:
+add small-b points to the reference data so CI covers this region, then
+revise fix 3 (for example, choose the branch whose result is the smaller of I
+and 1 - I, as Boost does) and re-verify, including a random spot-check.
 
 ## Notes
 
