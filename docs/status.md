@@ -23,7 +23,7 @@ _Updated at the end of every session. Start here._
   All four findings are **approved by owner** (2026-10-14); none is reported
   upstream (that needs a separate approval per report).
 - **Milestone 2 complete** ([PR #7](https://github.com/traderhall757-arch/rust-sci-verify/pull/7), merged).
-- **Milestone 3** (diagnose `puruspe::betai`; this session's PR): root cause in
+- **Milestone 3** (diagnose `puruspe::betai`; [PR #8](https://github.com/traderhall757-arch/rust-sci-verify/pull/8), open): root cause in
   [finding 001](../findings/001-puruspe-betai.md). Three bugs cause the wrong
   answers: missing parentheses in the quadrature integrand (every input with
   a, b > 3000 gives 0 or -0), a branch chosen by the sign of an underflowed
@@ -46,7 +46,7 @@ _Updated at the end of every session. Start here._
 
 ## Next
 
-1. Owner reviews and merges the Milestone 3 PR.
+1. Owner reviews and merges the Milestone 3 PR ([PR #8](https://github.com/traderhall757-arch/rust-sci-verify/pull/8)).
 2. Owner decisions needed (see the PR's "Questions for the owner"):
    - finding 001 now covers **all** inputs with a, b > 3000 (was 4 points): re-confirm;
    - whether and when to submit the patch to puruspe (rule 8: needs approval);
