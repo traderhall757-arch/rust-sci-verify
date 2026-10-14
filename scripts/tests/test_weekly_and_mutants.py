@@ -128,3 +128,37 @@ def test_mutation_main(tmp_path, capsys):
     (tmp_path / "outcomes.json").write_text(json.dumps(outcomes(1, 0)))
     assert mutation_score.main([str(tmp_path)]) == 0
     assert "100.0%" in capsys.readouterr().out
+
+
+def test_violations():
+    assert mutation_score.violations(outcomes(3, 0), 0, None) == []
+    assert mutation_score.violations(outcomes(3, 1), 0, None) == [
+        "1 surviving mutant(s); at most 0 allowed"
+    ]
+    assert mutation_score.violations(outcomes(3, 0, timeout=1), 0, None) != []
+    assert mutation_score.violations(outcomes(19, 1), None, 95) == []
+    assert mutation_score.violations(outcomes(18, 2), None, 95) == [
+        "mutation score 90.0% is below 95%"
+    ]
+    assert mutation_score.violations(outcomes(0, 0), 0, 95) == []
+
+
+def test_main_enforces_rule(tmp_path, capsys):
+    (tmp_path / "outcomes.json").write_text(json.dumps(outcomes(3, 1)))
+    assert mutation_score.main([str(tmp_path)]) == 0
+    assert mutation_score.main([str(tmp_path), "--max-survivors", "0"]) == 1
+    assert "**FAIL:** 1 surviving" in capsys.readouterr().out
+
+
+def test_exclusions_need_reasons(tmp_path):
+    ok = 'exclude_re = [\n  # reason: equivalent mutant\n  "report.rs:15",\n]\n'
+    bad = 'exclude_re = [\n  # just a note\n  "a",\n  # reason: fine\n  "b",\n  "c",\n]\n'
+    assert mutation_score.unexplained_exclusions("exclude_re = []\n") == []
+    assert mutation_score.unexplained_exclusions("# nothing\n") == []
+    assert mutation_score.unexplained_exclusions(ok) == []
+    assert mutation_score.unexplained_exclusions(bad) == ['"a"', '"c"']
+    cfg = tmp_path / "mutants.toml"
+    cfg.write_text(bad)
+    assert mutation_score.main(["--check-config", str(cfg)]) == 1
+    cfg.write_text(ok)
+    assert mutation_score.main(["--check-config", str(cfg)]) == 0

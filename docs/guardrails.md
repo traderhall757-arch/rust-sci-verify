@@ -9,13 +9,29 @@ pull request. Each one is listed with how it works and why.
 | 2 | Warnings are errors | `clippy`, all jobs | `cargo clippy --all-targets -- -D warnings`, `RUSTFLAGS=-D warnings`, and workspace lints deny `dead_code`, `unused`, `unreachable_pub`, `missing_docs`, `unsafe_code`. |
 | 3 | No stubs | `clippy` | Workspace lints deny `clippy::todo`, `clippy::unimplemented`, `clippy::dbg_macro`. |
 | 4 | Coverage at least 90% of lines | `coverage` | `cargo llvm-cov --workspace --fail-under-lines 90`; the table goes to the job summary. |
-| 5 | Mutation testing | `mutants` (PRs), weekly `mutants-full` | `cargo-mutants` on the PR's changed Rust code; all code weekly. Score in the job summary (`scripts/mutation_score.py`). Report-only until the owner sets a minimum. |
+| 5 | Mutation testing | `mutants` (PRs), weekly `mutants-full` | `cargo-mutants` on the PR's changed Rust code; all code weekly. Score in the job summary (`scripts/mutation_score.py`). Rule below. |
 | 6 | Every public function has a reference test | `guardrails` | `scripts/check_api_tests.py`; see below. |
 | 7 | No unused dependencies | `guardrails` | `cargo machete`. |
 | 8 | Pinned versions | `guardrails` | `scripts/check_pins.py`: exact toolchain in `rust-toolchain.toml`; `Cargo.lock` and `reference/uv.lock` committed; Python deps `==`; target crates `=x.y.z`; CI tools `@version`. |
 
 The guardrail scripts have their own tests (`scripts/tests/`), run in the
 `guardrails` job.
+
+## Mutation-testing rule (approved by the owner)
+
+A *mutant* is a small deliberate bug inserted into our code; a good test suite
+fails on it ("caught"). Mutants that do not compile ("unviable") are ignored.
+
+- **Pull requests:** the `mutants` job fails if any mutant in the changed code
+  survives (missed or timed out). The only way around it is to exclude that
+  mutant in `.cargo/mutants.toml` with a `# reason:` comment, typically because
+  the mutant does not change behaviour so no test could catch it. The
+  `guardrails` job checks that every exclusion has a reason, and every change
+  to the file is a "Checks changed" item.
+- **Weekly full run:** fails if the score over all code is below 95%.
+
+A fixed percentage is not used for pull requests because they are small: one
+survivor out of five mutants would already be 80%.
 
 ## Coverage: what is counted, and exclusions
 

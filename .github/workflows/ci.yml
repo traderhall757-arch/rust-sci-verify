@@ -92,9 +92,12 @@ jobs:
         run: cargo machete
       - name: Versions are pinned
         run: python3 scripts/check_pins.py
+      - name: Every mutation-testing exclusion has a reason
+        run: python3 scripts/mutation_score.py --check-config .cargo/mutants.toml
 
   mutants:
-    # Report-only until the owner sets a minimum score (see docs/status.md).
+    # Rule (docs/guardrails.md): no surviving mutant in changed code, except
+    # exclusions with a reason in .cargo/mutants.toml.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
@@ -117,5 +120,8 @@ jobs:
           cargo mutants --in-diff pr.diff --no-shuffle || status=$?
           # 0 = all caught, 2 = some missed, 3 = some timed out; anything else is an error.
           case "$status" in 0|2|3) ;; *) exit "$status" ;; esac
-          python3 scripts/mutation_score.py mutants.out >> "$GITHUB_STEP_SUMMARY"
-          python3 scripts/mutation_score.py mutants.out | head -n 3
+          rule=0
+          python3 scripts/mutation_score.py mutants.out --max-survivors 0 > score.md || rule=$?
+          cat score.md >> "$GITHUB_STEP_SUMMARY"
+          cat score.md
+          exit "$rule"

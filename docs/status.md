@@ -4,27 +4,26 @@ _Updated at the end of every session. Start here._
 
 ## Done
 
-- **Milestone 1a** ([PR #1](https://github.com/traderhall757-arch/rust-sci-verify/pull/1)):
+- **Milestone 1a** ([PR #1](https://github.com/traderhall757-arch/rust-sci-verify/pull/1), merged):
   workspace, `harness` crate, `reference/` generator (mpmath 1.4.1 at 50+100
   digits, SciPy 1.18.1, NumPy 2.5.4, Python 3.13, uv lockfile), data format
   schema 1, dataset `erfcx` (361 points), `check-puruspe` (erfcx: 317 pass, 44
   overflow convention, 0 wrong), CI jobs fmt / clippy / test / reference-fresh.
 - **Milestone 1b**: CI jobs `coverage` (99.2% lines, minimum 90%), `guardrails`
   (orphan files, API vs reference checks, cargo-machete, pins, script tests),
-  `mutants` (PR diff, report-only); weekly workflow (latest releases, issue in
+  `mutants` (PR diff: no surviving mutants unless excluded with a reason; weekly: at least 95%); weekly workflow (latest releases, issue in
   this repo only, full mutation run); SessionStart hook. See `docs/guardrails.md`.
 
 ## Next
 
-1. Owner decides the mutation-score rule (proposal in the 1b PR).
-2. Owner sets up the `main` ruleset requiring the CI checks.
-3. **Milestone 2** in a fresh session: reproduce the four pilot findings
+1. Owner sets up the `main` ruleset requiring the CI checks.
+2. **Milestone 2** in a fresh session: reproduce the four pilot findings
    (betai, gammp, statrs gamma pole, statrs erfc) plus the SciPy K_100 false
    alarm, with findings files. New datasets: betainc, gammainc, gamma, erfc, kv/yv.
 
 ## Open decisions (owner)
 
-- Mutation-score minimum (see the 1b PR).
+- None.
 
 ## Known problems / notes
 

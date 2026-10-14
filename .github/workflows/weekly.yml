@@ -89,4 +89,7 @@ jobs:
           status=0
           cargo mutants --workspace --no-shuffle || status=$?
           case "$status" in 0|2|3) ;; *) exit "$status" ;; esac
-          python3 scripts/mutation_score.py mutants.out >> "$GITHUB_STEP_SUMMARY"
+          rule=0
+          python3 scripts/mutation_score.py mutants.out --min-score 95 > score.md || rule=$?
+          cat score.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$rule"

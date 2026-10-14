@@ -1,0 +1,9 @@
+# cargo-mutants configuration (https://mutants.rs/).
+#
+# Mutation rule (approved by the owner): a pull request fails if any mutant in
+# its changed code survives (missed or timed out), unless that mutant is
+# excluded here. Every entry needs a `# reason:` comment on the line above it
+# explaining why no test can catch it (e.g. the mutant does not change
+# behaviour). scripts/mutation_score.py --check-config enforces the comment.
+# Adding or changing an entry is a "Checks changed" item in the PR.
+exclude_re = []
