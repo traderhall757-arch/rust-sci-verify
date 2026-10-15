@@ -7,12 +7,13 @@ import sys
 from pathlib import Path
 
 from .functions import ALL
-from .generate import generate
+from .generate import check_numpy_dispatch, generate
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 def main(argv: list[str]) -> int:
+    check_numpy_dispatch()
     wanted = set(argv)
     unknown = wanted - {s.name for s in ALL}
     if unknown:

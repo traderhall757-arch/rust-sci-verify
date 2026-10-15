@@ -11,8 +11,26 @@ import mpmath
 import numpy as np
 import scipy
 
+from . import NUMPY_DISABLED_TARGETS
 from .exact import json_number, to_f64
 from .spec import OVERFLOW, POLE, PRECISIONS, UNSTABLE, Spec
+
+
+def check_numpy_dispatch() -> None:
+    """Fail if NumPy runs AVX-512 code (see the package docstring's note).
+
+    NumPy reads NPY_DISABLE_CPU_FEATURES only when it is first imported, so
+    an earlier import (for example by a test runner) defeats the pin.
+    """
+    from numpy._core._multiarray_umath import __cpu_features__
+
+    active = [t for t in NUMPY_DISABLED_TARGETS.split() if __cpu_features__.get(t)]
+    if active:
+        raise RuntimeError(
+            f"NumPy AVX-512 targets active ({', '.join(active)}): reference values would "
+            "depend on the CPU. Import rsv_reference before numpy."
+        )
+
 
 SCHEMA = 1
 OUTPUT = "y"  # scalar functions have a single output named "y"
