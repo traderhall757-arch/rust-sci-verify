@@ -5,7 +5,9 @@
   plus a low-severity accuracy loss
 - **Status:** approved by owner (2026-10-14); extended to `gammainc_large`
   and root cause found 2026-10-15 (Claude, checklist complete; section
-  "Extension")
+  "Extension"); extended to `gamma_cdf` and to `gammq` on `gamma_sf`, and
+  groups 2 and 3 confirmed, 2026-10-15 (Claude, checklist complete;
+  section "Extension 2")
 - **Affected inputs:** 78 of 192 points of `reference/data/gammainc.jsonl`
   (tolerance 1e-12); the exact list is `GAMMP` in
   `crates/check-puruspe/src/expected.rs`, the report is
@@ -32,8 +34,21 @@
      a + 3 sqrt(a) at a = 1e8 and 1e9): up to 1.0e-7 (a = 1e8) and
      1.5e-6 (a = 1e9). Off the grid it reaches 1.3e-5 (a from 1e9 to
      1e10).
-  `gammq` uses the same branch: `gammq(100, 50)` is NaN as well (not
-  checked against a dataset; it is in the reproduction).
+  Also 155 of 538 points of `reference/data/gamma_cdf.jsonl` (P(a, x) with
+  rate 1, tolerance 1e-12; list `GAMMP_CDF`, added 2026-10-15): 23 NaN
+  (group 1's region, a = 100 to 1e6), 120 accuracy losses (group 2, a = 0.01
+  to 100, worst 1.0e-10 at a = 100, x = 0.1), 11 near the mean (group 5's
+  quadrature, a = 100 to 1e6, worst 1.1e-9 at a = 1e6, x = a) and 1 flushed
+  subnormal (group 3, P(50, 1e-5) = 3.3e-315; SciPy flushes it too). Its
+  other 20 failures there (0 for x < a 2^-52) are
+  [finding 034](034-puruspe-gammq.md).
+
+  `gammq` uses the same quadrature: 43 of 538 points of
+  `reference/data/gamma_sf.jsonl` (list `GAMMQ_APPROX`), all with a >= 100
+  and 0.2a <= x <= a + 20 (sqrt(a) + 1): 23 NaN (x <= a - 1, e.g.
+  `gammq(100, 50)`, true value 0.99999999968) and 20 accuracy losses above
+  the mean (worst 1.2e-9 at a = 1e6, x = a + sqrt(a)). Its other 180
+  failures are [finding 034](034-puruspe-gammq.md).
 
 ## Reproduction
 
@@ -139,7 +154,44 @@ The true values come from `mpmath.gammainc(a, 0, x, regularized=True)`, tested
 against the finite sum Q(a, x) = e^-x sum_{k<a} x^k/k! for integer a (DLMF
 8.4.10), including P(500, 100), in `reference/tests/test_functions.py`.
 
-Leads for the accuracy loss of group 2 (the NaN is diagnosed above):
+Leads for the accuracy loss of group 2 (the NaN is diagnosed above;
+confirmed in "Extension 2"):
 
 - The accuracy floor of about 1e-11 matches the one in `betai`
   ([001](001-puruspe-betai.md)); both use the same short Lanczos `ln_gamma`.
+
+## Extension 2 (2026-10-15): `gamma_cdf`, `gammq`, and groups 2 and 3 confirmed
+
+`gammp` now also runs on `gamma_cdf` (the gamma distribution's cdf with
+rate 1, which is P(a, x) on a wider grid: x down to 1e-300, shapes up to
+1e6) and `gammq` on `gamma_sf` (finding 034 has the details of `gammq`).
+
+1. **Reproduced**: the program in [finding 034](034-puruspe-gammq.md)
+   (fresh `cargo new` project, `puruspe = "=0.4.4"`, release and debug)
+   prints NaN for `gammq(100, 50)` and 0.15865521344059652 instead of
+   0.15865521363165971 for `gammq(1e6, 1001000)`.
+2. **Arbiter checked**: the `gamma_cdf` / `gamma_sf` routes (series DLMF
+   8.7.1, continued fraction DLMF 8.9.2) are tested against
+   `mpmath.gammainc`, the finite sum DLMF 8.4.10 and closed forms
+   (finding 012); mpmath at 50 and 100 digits agrees at every point.
+3. **Second opinion**: SciPy agrees with mpmath within 3.5e-13 at every
+   listed point except P(50, 1e-5) (subnormal, SciPy flushes it too) and
+   P(1e6, 990000) (SciPy off by 2.1e-10; the finite sum confirms mpmath,
+   see the dataset's tolerance note).
+4. **Off-grid**: the 2,000 random points of finding 034 (`random.Random(20261030)`)
+   for `gammq`: NaN at all 149 points with a >= 100 and
+   0.2a <= x <= a - 1 and nowhere else; the quadrature region above the
+   mean fails 175 of 175 (worst 1.8e-9).
+5. **Root cause of groups 2 and 3, confirmed.** A copy of `gammp`, `gammq`,
+   `gser`, `gcf` and `gammpapprox` (scratch crate, not committed) matches
+   the crate bit for bit on `gammainc`, `gamma_cdf` and `gamma_sf`. Replacing
+   `ln_gamma` in the prefactor of `gser` and `gcf` by libm's `lgamma`
+   (about 1 ulp) and dropping their `log_result < -700.0` shortcut (which
+   returns 0 for results below about 1e-304) leaves on `gammainc` only the
+   8 failures of the quadrature region (from 78) and on `gamma_cdf` only
+   the 30 of the quadrature region (from 175, after also dropping the
+   x < a 2^-52 shortcut of finding 034). So group 2 is
+   [finding 033](033-puruspe-ln-gamma.md)'s `ln_gamma` error (an absolute
+   error in ln Gamma(a) is a relative error in P), amplified by 1 - Q
+   where `gammp` subtracts the continued fraction from 1; group 3 is the
+   -700 shortcut.

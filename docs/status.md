@@ -499,7 +499,7 @@ _Updated at the end of every session. Start here._
 - **Milestone 4, part 19: puruspe ln_gamma and gammp for large shapes**
   (follow-up; `puruspe::ln_gamma` on `gammaln`, `puruspe::gammp` on
   `gammainc_large`;
-  [PR #32](https://github.com/traderhall757-arch/rust-sci-verify/pull/32), open):
+  [PR #32](https://github.com/traderhall757-arch/rust-sci-verify/pull/32), merged):
   - `ln_gamma` runs on the 877 `gammaln` points where Gamma(x) > 0 or x is
     a pole (as for statrs) and fails 666: **finding 033** (high), approved
     by Claude after the checklist. No reflection formula (NaN below -4.5,
@@ -515,12 +515,39 @@ _Updated at the end of every session. Start here._
     the grid at a = 1e10): the a ln a cancellation in the scale and the
     18-point quadrature, of equal size (shown with a copy of the function).
 
+- **Milestone 4, part 20: puruspe gamma, gammq, and gammp on the
+  distribution data** (follow-up; `puruspe::gamma` on `gamma`,
+  `puruspe::gammq` on `gamma_sf`, `puruspe::gammp` on `gamma_cdf`;
+  [PR #33](https://github.com/traderhall757-arch/rust-sci-verify/pull/33), open):
+  - `gamma` (the Fukushima port) passes all 901 points (worst 1.5e-15).
+  - `gammq` fails 223 of 538. **Finding 034** (high), approved by Claude after
+    the checklist, covers 180: it returns 0 for every x > a + 20 (sqrt(a) + 1)
+    (63 points; `gammq(1, 50)` = 0 instead of e^-50 = 1.9e-22), 1 for every
+    x < a 2^-52 (6 points; `gammq(0.01, 1e-20)` = 1 instead of 0.365), and
+    loses digits through `ln_gamma` (finding 033) in its prefactor (111
+    points, up to 8.1e-9 where Q = 1 - P is small). The other 43 are the
+    shared quadrature (finding 002: 23 NaN, 20 up to 1.2e-9).
+  - `gammp` on `gamma_cdf` fails 175 of 538: 20 from the same small-x
+    shortcut (returns 0; `gammp(0.01, 1e-20)` = 0 instead of 0.635; finding
+    034), which the `gammainc` grid (x >= 0.001) never reached; 155 are
+    finding 002's (extended).
+  - Finding 002's accuracy loss (group 2) and flushed subnormal (group 3)
+    are now confirmed: a bit-exact switchable copy with libm's `lgamma` and
+    without the `log_result < -700` shortcut leaves only the quadrature
+    region failing on `gammainc`, `gamma_cdf` and `gamma_sf`.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 19, puruspe
-   `ln_gamma` and `gammp` for large shapes, finding 033 and the extension
-   of finding 002).
+1. **Owner: review and merge the open PR** (Milestone 4 part 20, puruspe
+   `gamma`, `gammq` and `gammp` on the distribution data, finding 034 and
+   the extension of finding 002).
 2. **Milestone 4, continued** (next session; one family per PR):
+   - **`Chi::inverse_cdf`**: it uses `newton_raphson_quantile` like
+     `InverseGamma` (finding 025: density overflow, bracket from `cdf`);
+     check it, then `Weibull`, `LogNormal`, `Pareto`, `Gumbel`, `Laplace`,
+     `Cauchy`, `Levy` (closed forms: look for finding 023's `1 - exp(..)`).
+     Each needs small new datasets; suggested next, as it needs no exact
+     discrete distributions.
    - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and
      asymptotic), `ks_onesample` / two-sample (exact distributions),
      `fishers_exact` (hypergeometric sums), `anderson_darling` (its p-value
@@ -528,13 +555,9 @@ _Updated at the end of every session. Start here._
      p-value only against the same published formula). Each needs its exact
      distribution in mpmath. Expect the `1 - cdf` pattern of findings
      026 to 029.
-   - **`Chi::inverse_cdf`**: it uses `newton_raphson_quantile` like
-     `InverseGamma` (finding 025: density overflow, bracket from `cdf`);
-     check it, then `Weibull`, `LogNormal`, `Pareto`, `Gumbel`, `Laplace`,
-     `Cauchy`, `Levy` (closed forms: look for finding 023's `1 - exp(..)`).
-   - puruspe `gamma` (the Fukushima port) and `gammq` have no checks yet;
-     `gamma` can run on the `gamma` dataset, `gammq` on the `gamma_sf`
-     data (finding 002 already shows `gammq(100, 50)` = NaN).
+   - puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
+     and finding 002's NaN may break it) on `gamma_ppf`; puruspe `invbetai`
+     on `betaincinv`; puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
    - Optional: the K result of `Inu_Knu` on the `kv` grid (finding 008's
      code path).
    - Keep expected lists small: vector inputs are listed value by value, so
@@ -548,7 +571,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 033 likewise (and finding 002's extension, 2026-10-15).
+  007 to 034 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
