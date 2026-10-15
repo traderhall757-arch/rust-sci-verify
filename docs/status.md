@@ -428,7 +428,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 15: statrs chi-squared test and one-way ANOVA** (statrs
   `stats_tests::chisquare`, `stats_tests::f_oneway`; PR open):
-  - New datasets `chisquare` (184 points: 2 to 30 categories, equal or
+  - New datasets `chisquare` (175 points: 2 to 30 categories, equal or
     sloping expected frequencies, totals 100 to 1e6, ddof 0 and 1) and
     `f_oneway` (48 points: 2 to 5 groups of 2 to 30 values around 0 and 100,
     group shifts 0.001 to 30); outputs statistic and p-value; tolerance 5e-12

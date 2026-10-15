@@ -1738,7 +1738,8 @@ def _chisquare_grid() -> list[tuple[tuple[float, ...], tuple[float, ...], float]
                     if obs == exp:
                         continue  # rounding left the counts at their expectation
                     for ddof in (0.0, 1.0):
-                        if ddof < k - 1:
+                        # A small total can round two deltas to the same counts.
+                        if ddof < k - 1 and (obs, exp, ddof) not in points:
                             points.append((obs, exp, ddof))
     return points
 

@@ -5,7 +5,7 @@
   returned as exactly 0, and every p-value below about 1e-5 loses digits:
   `chisquare(&[1000, 1300], None, None)` is 1.0e-8 off, `&[100, 200]` 1.7e-9)
 - **Status:** approved (Claude, checklist complete, 2026-10-15)
-- **Affected inputs:** 29 of 184 points of `reference/data/chisquare.jsonl`
+- **Affected inputs:** 29 of 175 points of `reference/data/chisquare.jsonl`
   (tolerance 5e-12, for the statistic and the p-value) with `f_exp` given, and
   14 of the 76 points with equal expected frequencies when run with
   `f_exp = None` (the default). The exact lists are `CHISQUARE` and
