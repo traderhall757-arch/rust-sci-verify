@@ -14,6 +14,28 @@ use statrs::stats_tests::skewtest::skewtest;
 use statrs::stats_tests::ttest_onesample::ttest_onesample;
 use statrs::stats_tests::{Alternative, NaNPolicy};
 
+/// The points of the gammaln dataset where Gamma(x) is positive or x is a pole.
+/// statrs documents `ln_gamma` as the logarithm of Gamma, not of |Gamma|, so
+/// where Gamma(x) < 0 (x < 0 with an odd floor) its NaN is its documented
+/// answer and those points are not run. The report counts only these points,
+/// and its grid line says so.
+fn gamma_not_negative() -> Dataset {
+    let mut data =
+        Dataset::load(&workspace_root(), "gammaln").unwrap_or_else(|e| panic!("gammaln: {e}"));
+    data.points.retain(|p| {
+        let x = p.scalar("x");
+        x > 0.0 || p.tags.contains(&harness::Tag::Pole) || x.floor().rem_euclid(2.0) == 0.0
+    });
+    data.header.points = data.points.len();
+    data.header.grid = format!(
+        "the points of the gammaln grid where Gamma(x) > 0 or x is a pole, {} of its points \
+         (statrs's ln_gamma is the logarithm of Gamma, not of |Gamma|). The full grid: {}",
+        data.points.len(),
+        data.header.grid
+    );
+    data
+}
+
 /// The standard normal distribution (the reference data has mean 0, sd 1).
 fn standard_normal() -> Normal {
     Normal::new(0.0, 1.0).expect("valid parameters")
@@ -193,6 +215,26 @@ fn statrs_matches_reference() {
             }],
         }
         .run(|p| Outcome::scalar(gamma::gamma(p.scalar("x")))),
+        Check {
+            function: "statrs::function::gamma::ln_gamma",
+            dataset: "gammaln",
+            expected: &[Expected {
+                finding: "030-statrs-ln-gamma",
+                points: expected::LN_GAMMA,
+            }],
+        }
+        .run_on(gamma_not_negative(), |p| {
+            Outcome::scalar(gamma::ln_gamma(p.scalar("x")))
+        }),
+        Check {
+            function: "statrs::function::gamma::digamma",
+            dataset: "digamma",
+            expected: &[Expected {
+                finding: "031-statrs-digamma",
+                points: expected::DIGAMMA,
+            }],
+        }
+        .run(|p| Outcome::scalar(gamma::digamma(p.scalar("x")))),
         Check {
             function: "statrs::function::erf::erfc",
             dataset: "erfc",
