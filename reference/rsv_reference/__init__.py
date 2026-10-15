@@ -16,3 +16,12 @@ import os
 # Target names are those of the pinned NumPy (2.5).
 NUMPY_DISABLED_TARGETS = "X86_V4 AVX512_ICL AVX512_SPR"
 os.environ["NPY_DISABLE_CPU_FEATURES"] = NUMPY_DISABLED_TARGETS
+
+# SciPy and NumPy call OpenBLAS (for example in scipy.stats.f_oneway), which
+# also picks its kernels by CPU: its SkylakeX (AVX-512) kernels round
+# differently from the Haswell (AVX2) kernels that the CI runners use, and the
+# reference files must not depend on the machine. Pin every machine to Haswell,
+# again before NumPy or SciPy load OpenBLAS; generate.check_numpy_dispatch()
+# checks that the variable is in place.
+OPENBLAS_CORETYPE = "Haswell"
+os.environ["OPENBLAS_CORETYPE"] = OPENBLAS_CORETYPE

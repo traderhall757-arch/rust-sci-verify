@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 import platform
 import warnings
 from dataclasses import dataclass
@@ -11,13 +12,14 @@ import mpmath
 import numpy as np
 import scipy
 
-from . import NUMPY_DISABLED_TARGETS
+from . import NUMPY_DISABLED_TARGETS, OPENBLAS_CORETYPE
 from .exact import json_number, to_f64
 from .spec import OVERFLOW, POLE, PRECISIONS, UNSTABLE, Spec
 
 
 def check_numpy_dispatch() -> None:
-    """Fail if NumPy runs AVX-512 code (see the package docstring's note).
+    """Fail if NumPy runs AVX-512 code or OpenBLAS is not pinned (see the
+    package's notes).
 
     NumPy reads NPY_DISABLE_CPU_FEATURES only when it is first imported, so
     an earlier import (for example by a test runner) defeats the pin.
@@ -29,6 +31,11 @@ def check_numpy_dispatch() -> None:
         raise RuntimeError(
             f"NumPy AVX-512 targets active ({', '.join(active)}): reference values would "
             "depend on the CPU. Import rsv_reference before numpy."
+        )
+    if os.environ.get("OPENBLAS_CORETYPE") != OPENBLAS_CORETYPE:
+        raise RuntimeError(
+            f"OPENBLAS_CORETYPE is not {OPENBLAS_CORETYPE}: reference values would depend on "
+            "the CPU. Import rsv_reference before numpy and scipy."
         )
 
 
