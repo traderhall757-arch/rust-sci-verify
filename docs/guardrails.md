@@ -14,6 +14,7 @@ pull request. Each one is listed with how it works and why.
 | 7 | No unused dependencies | `guardrails` | `cargo machete`. |
 | 8 | Pinned versions | `guardrails` | `scripts/check_pins.py`: exact toolchain in `rust-toolchain.toml`; `Cargo.lock` and `reference/uv.lock` committed; Python deps `==`; target crates `=x.y.z`; CI tools `@version`. |
 | 9 | A tested fix is the patch offered upstream | `guardrails` | `scripts/check_fixes.py --run-tests`: applies each `fixes/` patch to the pinned upstream source, checks that the items listed under `[package.metadata.rsv.fix]` in the fix crate equal the patched ones character for character, and runs the patched crate's own tests. See `fixes/README.md`. |
+| 10 | Committed data equals a fresh regeneration | `reference-fresh`, weekly `reference-fresh` | `python -m rsv_reference` regenerates the data, then `git status` must show no change in `reference/data/` (untracked files included). Pushes to `main` and the weekly run regenerate every dataset; pull requests only the datasets `scripts/select_datasets.py` says they can have changed. See below. |
 
 The guardrail scripts have their own tests (`scripts/tests/`), run in the
 `guardrails` job.
@@ -58,6 +59,35 @@ Each crate declares a role in `Cargo.toml` under `[package.metadata.rsv]`:
 
 There are no implementation crates yet, so today this guardrail enforces the
 roles and the "check crates export nothing" rule; it starts biting in Phase C.
+
+## Which datasets a pull request regenerates
+
+Regenerating everything takes over ten minutes and grows with every dataset,
+so on a pull request `scripts/select_datasets.py` decides, and prints one line
+per dataset saying whether it is regenerated and why (also in the job summary).
+It is safe because `python -m rsv_reference` generates each dataset in its own
+fresh process, so a dataset's file depends only on:
+
+1. the Python environment and the generator: any change under `reference/`
+   other than `functions.py`, `data/` and `tests/`, or to `ci.yml` or the
+   script itself, regenerates **everything**;
+2. the parts of `functions.py` that run in every process at import (imports,
+   module-level statements, decorated functions, assignments that call
+   anything but `Spec`, and everything those reach): any change regenerates
+   **everything**;
+3. the definitions its `Spec` reaches through names, transitively: if any of
+   them changed (compared as syntax trees, so comments and formatting do not
+   count), or its data file changed, or it is new, **that dataset** is
+   regenerated.
+
+Anything the analysis cannot follow (`globals()`, `eval`, a name bound twice,
+an import outside a short list, a module that `functions.py` imports importing
+it back) regenerates everything. The script fails the job if the datasets it
+reads from the source differ from the imported registry, or if a data file has
+no dataset (or a dataset no file), so nothing is skipped silently. Every
+commit on `main` finishes a full regeneration (CI runs on `main` are not
+cancelled), and the weekly workflow repeats it with the pinned versions and
+opens a `reference-stale` issue if anything differs.
 
 ## Weekly job (`.github/workflows/weekly.yml`)
 

@@ -75,6 +75,54 @@ jobs:
               --body-file "$RUNNER_TEMP/weekly.md"
           fi
 
+  reference-fresh:
+    # With the pinned versions, the committed data must equal a regeneration
+    # of every dataset (pull requests regenerate only what they can change).
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - name: Regenerate all reference data with the pinned versions
+        working-directory: reference
+        run: uv sync -q --locked && uv run -q python -m rsv_reference
+      - name: Compare with the committed data
+        run: |
+          changed=$(git status --porcelain --untracked-files=all -- reference/data/)
+          if [ -z "$changed" ]; then exit 0; fi
+          {
+            echo "With the pinned versions, these committed data files differ from a fresh"
+            echo "regeneration of every dataset:"
+            echo '```'; echo "$changed"; echo '```'
+          } | tee "$RUNNER_TEMP/stale.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "STALE=true" >> "$GITHUB_ENV"
+      - name: Open or update the stale-data issue (this repository only)
+        if: env.STALE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          repo="$GITHUB_REPOSITORY"
+          echo "" >> "$RUNNER_TEMP/stale.md"
+          echo "Run: $RUN_URL" >> "$RUNNER_TEMP/stale.md"
+          gh label create reference-stale --repo "$repo" --force \
+            --color d93f0b --description "Committed reference data differs from a full regeneration"
+          num=$(gh issue list --repo "$repo" --state open --label reference-stale \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --repo "$repo" --body-file "$RUNNER_TEMP/stale.md"
+            gh issue comment "$num" --repo "$repo" --body "Updated by the weekly run: $RUN_URL"
+          else
+            gh issue create --repo "$repo" --label reference-stale \
+              --title "Weekly verification: committed reference data is stale" \
+              --body-file "$RUNNER_TEMP/stale.md"
+          fi
+          exit 1
+
   mutants-full:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
