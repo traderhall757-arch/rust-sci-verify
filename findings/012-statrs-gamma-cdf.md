@@ -28,7 +28,16 @@
   a >= 1000, worst 2.5e-11, and the subnormal results at a = 5, x = 1/750
   (`cdf`, true 2.5e-316) and a = 50, x = 1/1e-5 (`sf`, true 3.3e-315). Rounding
   1/x costs at most 3.4e-13 on that grid (its tolerance reason). Its
-  panics for tiny x are finding 024. Two groups,
+  panics for tiny x are finding 024. Called directly (added 2026-10-15),
+  `statrs::function::gamma::gamma_lr` fails at 1 of 192 points of
+  `reference/data/gammainc.jsonl` (a = 200, x = 2: true 2.8e-316, returned
+  as 0; list `GAMMA_LR`; its panics at x = 0 are finding 032) and at 14 of
+  51 points of `reference/data/gammainc_large.jsonl` (7 each at a = 1e8
+  and 1e9, across the bulk and both tails down to 2e-198; list
+  `GAMMA_LR_LARGE`). There cause 1 reaches 2.6e-7 (a = 1e8) and 4.1e-6
+  (a = 1e9): the spacing of doubles near a ln a (1.8e9 and 2.1e10) is 2.4e-7
+  and 3.8e-6, the absolute error that rounding the terms of `ax` leaves.
+  Two groups,
   by cause (section "Root cause"):
   1. **Large shape** (41 points, all with a >= 1000): the error grows like
      the shape, worst per shape 1.4e-12 (a = 1000), 2.4e-11 (1e4), 4.3e-10

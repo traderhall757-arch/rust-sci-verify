@@ -7,7 +7,7 @@ use statrs::distribution::{
     Beta, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, InverseGamma, Normal,
     StudentsT,
 };
-use statrs::function::{erf, gamma};
+use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
 use statrs::stats_tests::f_oneway::f_oneway;
 use statrs::stats_tests::skewtest::skewtest;
@@ -235,6 +235,57 @@ fn statrs_matches_reference() {
             }],
         }
         .run(|p| Outcome::scalar(gamma::digamma(p.scalar("x")))),
+        Check {
+            function: "statrs::function::gamma::gamma_lr",
+            dataset: "gammainc",
+            expected: &[
+                Expected {
+                    finding: "032-statrs-gamma-lr-zero",
+                    points: expected::GAMMA_LR_ZERO,
+                },
+                Expected {
+                    finding: "012-statrs-gamma-cdf",
+                    points: expected::GAMMA_LR,
+                },
+            ],
+        }
+        .run(|p| Outcome::scalar(gamma::gamma_lr(p.scalar("a"), p.scalar("x")))),
+        Check {
+            function: "statrs::function::gamma::gamma_lr",
+            dataset: "gammainc_large",
+            expected: &[Expected {
+                finding: "012-statrs-gamma-cdf",
+                points: expected::GAMMA_LR_LARGE,
+            }],
+        }
+        .run(|p| Outcome::scalar(gamma::gamma_lr(p.scalar("a"), p.scalar("x")))),
+        Check {
+            function: "statrs::function::beta::beta_reg",
+            dataset: "betainc",
+            expected: &[Expected {
+                finding: "019-statrs-beta-cdf",
+                points: expected::BETA_REG,
+            }],
+        }
+        .run(|p| Outcome::scalar(beta::beta_reg(p.scalar("a"), p.scalar("b"), p.scalar("x")))),
+        Check {
+            function: "statrs::function::beta::beta_reg",
+            dataset: "betainc_large",
+            expected: &[Expected {
+                finding: "019-statrs-beta-cdf",
+                points: expected::BETA_REG_LARGE,
+            }],
+        }
+        .run(|p| Outcome::scalar(beta::beta_reg(p.scalar("a"), p.scalar("b"), p.scalar("x")))),
+        Check {
+            function: "statrs::function::beta::beta_reg",
+            dataset: "betainc_switch",
+            expected: &[Expected {
+                finding: "019-statrs-beta-cdf",
+                points: expected::BETA_REG_SWITCH,
+            }],
+        }
+        .run(|p| Outcome::scalar(beta::beta_reg(p.scalar("a"), p.scalar("b"), p.scalar("x")))),
         Check {
             function: "statrs::function::erf::erfc",
             dataset: "erfc",
