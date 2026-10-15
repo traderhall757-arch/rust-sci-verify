@@ -955,6 +955,187 @@ def test_beta_prefix_logarithm_matches_the_tolerance_reason():
         assert loss * 2.0**-53 > functions.BETA_CDF.tolerance == functions.BETA_SF.tolerance
 
 
+# --- f_cdf, f_sf, f_ppf ---
+
+
+@pytest.mark.parametrize(
+    ("d1", "d2", "x"), [(1.0, 2.0, 0.5), (5.0, 10.0, 2.0), (10.0, 5.0, 0.3), (30.0, 100.0, 1.5)]
+)
+def test_f_cdf_and_sf_match_mpmath_betainc(d1, d2, x):
+    # Both sides of the switch point against mpmath's hypergeometric
+    # evaluation of I_z(d1/2, d2/2) with z = d1 x / (d1 x + d2).
+    with mpmath.workdps(50):
+        d1, d2, x = mp(d1, d2, x)
+        z = d1 * x / (d1 * x + d2)
+        a, b = d1 / 2, d2 / 2
+        assert close(functions._mp_f_cdf(d1, d2, x), mpmath.betainc(a, b, 0, z, regularized=True))
+        assert close(functions._mp_f_sf(d1, d2, x), mpmath.betainc(a, b, z, 1, regularized=True))
+
+
+@pytest.mark.parametrize(
+    ("d1", "d2", "x"),
+    [
+        (1e5, 10.0, 0.5),
+        (1e5, 30.0, 0.1),
+        (30.0, 1e5, 3.5823761667632135),
+        (1e5, 1e5, 1.0),
+        (1e5, 0.5, 1e10),
+        (0.5, 1e5, 1e-10),
+    ],
+)
+def test_f_cdf_and_sf_match_the_series_on_the_smaller_tail(d1, d2, x):
+    # The positive-term series DLMF 8.17.8 (_mp_betainc) on the smaller tail,
+    # at points where SciPy fails (rows 1 to 3) or statrs fails worst: I_z(a, b)
+    # for the lower tail, I_y(b, a) for the upper tail, y = d2 / (d1 x + d2).
+    with mpmath.workdps(50):
+        d1, d2, x = mp(d1, d2, x)
+        a, b = d1 / 2, d2 / 2
+        z, y = d1 * x / (d1 * x + d2), d2 / (d1 * x + d2)
+        cdf, sf = functions._mp_f_cdf(d1, d2, x), functions._mp_f_sf(d1, d2, x)
+        if cdf <= sf:
+            assert close(cdf, functions._mp_betainc(a, b, z))
+        else:
+            assert close(sf, functions._mp_betainc(b, a, y))
+
+
+@pytest.mark.parametrize("x", [1e-300, 1e-20, 1e-5, 0.5, 1.0, 3.0, 1e5, 1e20, 1e300])
+def test_f_cdf_and_sf_match_closed_forms(x):
+    # d1 = d2 = 1: F = (2/pi) atan(sqrt x), 1 - F = (2/pi) atan(1 / sqrt x)
+    # (SciPy is wrong at x = 1e20 for cdf and 1e-20 for sf);
+    # d2 = 2: F = z^(d1/2); d1 = 2: 1 - F = (1 + 2 x / d2)^(-d2/2).
+    with mpmath.workdps(60):
+        (x,) = mp(x)
+        one, two, five = mp(1, 2, 5)
+        root = mpmath.sqrt(x)
+        assert close(functions._mp_f_cdf(one, one, x), 2 / mpmath.pi * mpmath.atan(root))
+        assert close(functions._mp_f_sf(one, one, x), 2 / mpmath.pi * mpmath.atan(1 / root))
+        z = five * x / (five * x + two)
+        assert close(functions._mp_f_cdf(five, two, x), z ** (five / 2))
+        assert close(functions._mp_f_sf(two, five, x), (1 + 2 * x / five) ** (-five / 2))
+
+
+def test_f_cdf_and_sf_sum_to_one_and_cover_zero():
+    with mpmath.workdps(50):
+        for d1, d2 in (mp(0.5, 1e5), mp(2.0, 3.0), mp(1e5, 1e5), mp(1e5, 0.5)):
+            assert functions._mp_f_cdf(d1, d2, mpmath.mpf(0)) == 0
+            assert functions._mp_f_sf(d1, d2, mpmath.mpf(0)) == 1
+            for x in mp(1e-300, 0.01, 1.0, 50.0, 1e300):
+                total = functions._mp_f_cdf(d1, d2, x) + functions._mp_f_sf(d1, d2, x)
+                assert close(total, 1)
+
+
+def test_f_grid_covers_both_tails_and_the_bulk():
+    grid = functions._f_x_grid()
+    assert all(x >= 0 for _, _, x in grid)
+    assert len(grid) == len(set(grid)) == 1999
+    narrow = [x for d1, d2, x in grid if (d1, d2) == (1e5, 1e5)]
+    # The 1 + k s points of the narrowest distribution (s = 0.0063) are on the grid.
+    assert sum(0.9 < x < 1.1 and x != 1 for x in narrow) == 6
+    assert {0.0, 1e-300, 1.0, 1e300} <= set(narrow)
+
+
+def _f_rows(name):
+    data = Path(__file__).resolve().parent.parent / "data"
+    lines = (data / f"{name}.jsonl").read_text().splitlines()[1:]
+    return [json.loads(line) for line in lines]
+
+
+@pytest.mark.parametrize(("name", "upper", "worst", "at"), [
+    ("f_cdf", False, 1647.79, (1e5, 1e5, 0.9367544467966324)),
+    ("f_sf", True, 1548.63, (1e5, 1e5, 1.0632455532033676)),
+])  # fmt: skip
+def test_f_condition_matches_the_tolerance_reason(name, upper, worst, at):
+    # Over the committed data: the largest |x f / F| (or over 1 - F) at a
+    # normal result, which a rounding of z or y multiplies.
+    best = (0.0, None)
+    for row in _f_rows(name):
+        d1, d2, x = (row["in"][k][0] for k in ("d1", "d2", "x"))
+        if x > 0 and float(row["mpmath"]["y"][0]) >= 2.0**-1022:
+            best = max(best, (float(functions.f_condition(d1, d2, x, upper)), (d1, d2, x)))
+    assert best[1] == at
+    assert worst < best[0] < worst + 0.01
+    assert 2 * best[0] * 2.0**-53 < functions.F_CDF.tolerance == functions.F_SF.tolerance
+
+
+def test_f_prefix_logarithm_matches_the_tolerance_reason():
+    # The largest prefix logarithm: ln Gamma(a + b) at d1 = d2 = 1e5, 1.05e6,
+    # whose rounding alone (1.2e-10) exceeds the tolerance.
+    worst = functions.beta_prefix_log_magnitude(5e4, 5e4, 0.5)
+    assert worst == pytest.approx(float(mpmath.loggamma(1e5)))
+    assert 1.05e6 < worst < 1.06e6
+    assert 1.1e-10 < worst * 2.0**-53 < 1.2e-10
+    assert worst * 2.0**-53 > functions.F_CDF.tolerance
+
+
+@pytest.mark.parametrize(
+    "p", [5e-324, 1e-300, 1e-20, 1e-5, 0.1, 0.5, 0.9, 1 - 1e-5, 1 - 1e-10, 1 - 1e-15]
+)
+def test_f_ppf_matches_closed_forms(p):
+    # d1 = d2 = 1: x = tan(pi p / 2)^2; d1 = 2: x = (d2 / 2) ((1 - p)^(-2/d2) - 1);
+    # d2 = 2: z = p^(2/d1), x = (2 / d1) z / (1 - z).
+    with mpmath.workdps(60):
+        (p,) = mp(p)
+        one, two, five = mp(1, 2, 5)
+        assert close(functions._mp_f_ppf(one, one, p), mpmath.tan(mpmath.pi * p / 2) ** 2)
+        q = mpmath.fsub(1, p, exact=True)
+        assert close(
+            functions._mp_f_ppf(two, five, p), five / 2 * mpmath.expm1(-2 / five * mpmath.log(q))
+        )
+        z = p ** (2 / five)
+        assert close(
+            functions._mp_f_ppf(five, two, p),
+            2 / five * z / -mpmath.expm1(2 / five * mpmath.log(p)),
+        )
+
+
+@pytest.mark.parametrize(
+    ("d1", "d2", "p"),
+    [
+        (1e5, 1.0, 5e-324),
+        (1000.0, 1e5, 5e-324),
+        (10.0, 30.0, 5e-324),
+        (1e5, 0.5, 0.5),
+        (0.5, 1e5, 1 - 1e-15),
+        (1e5, 1e5, 0.999),
+        (5.0, 0.5, 1e-300),
+        (1000.0, 0.5, 1e-100),
+        (0.5, 1e5, 1e-100),
+    ],
+)
+def test_f_ppf_inverts_the_cdf(d1, d2, p):
+    # F(ppf(p)) = p, through the independently tested cdf and sf, at points
+    # where SciPy fails (rows 1 to 3 and the last, whose quantile is far below
+    # the smallest double) or statrs fails worst.
+    with mpmath.workdps(50):
+        d1, d2, p = mp(d1, d2, p)
+        x = functions._mp_f_ppf(d1, d2, p)
+        if p <= 0.5:
+            assert close(functions._mp_f_cdf(d1, d2, x), p, 35)
+        else:
+            assert close(functions._mp_f_sf(d1, d2, x), 1 - p, 35)
+
+
+def test_f_ppf_ends_and_tags():
+    assert functions._f_ppf_tags(1.0, 1.0, 1.0) == [POLE]
+    assert functions._f_ppf_tags(1.0, 1.0, 0.0) == []
+    with mpmath.workdps(50):
+        assert functions._mp_f_ppf(*mp(2.0, 3.0, 0.0)) == 0
+    assert len(functions._f_ppf_grid()) == 81 * 20
+
+
+def test_f_ppf_log_magnitude_matches_the_tolerance_reason():
+    worst = (0.0, None)
+    for row in _f_rows("f_ppf"):
+        v = row["mpmath"]["y"][0]
+        if not isinstance(v, str) and 2.0**-1022 <= v:
+            worst = max(
+                worst, (abs(math.log(v)), tuple(row["in"][k][0] for k in ("d1", "d2", "p")))
+            )
+    assert worst[1][0] == 2.0 and worst[1][2] == 1e-300
+    assert 690.7 < worst[0] < 690.8
+    assert functions.F_PPF.tolerance >= 2 * worst[0] * 2.0**-53
+
+
 # --- gammaln, gammasgn, gammainc_large ---
 
 

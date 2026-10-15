@@ -30,7 +30,10 @@
      mirror image, `sf(0.00010486206385669913)` at a = 0.1, b = 1e4.
 
 statrs's `StudentsT` uses the same `beta_reg` and shares both causes
-([finding 010](010-statrs-students-t.md), causes 2 and 3).
+([finding 010](010-statrs-students-t.md), causes 2 and 3), and so does
+`FisherSnedecor`, which adds a rounded argument and, for shapes near 5e4,
+suffers from the 140-iteration cap
+([finding 021](021-statrs-fisher-snedecor-cdf.md)).
 `Beta::inverse_cdf` has its own, worse problems:
 [finding 020](020-statrs-beta-inverse-cdf.md).
 

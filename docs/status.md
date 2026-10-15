@@ -272,7 +272,7 @@ _Updated at the end of every session. Start here._
     failure (0 of 5,111) and gives +inf at the poles.
 
 - **Milestone 4, part 10: statrs Beta distribution** (statrs `Beta::cdf`,
-  `sf`, `inverse_cdf`; [PR #22](https://github.com/traderhall757-arch/rust-sci-verify/pull/22), open):
+  `sf`, `inverse_cdf`; [PR #22](https://github.com/traderhall757-arch/rust-sci-verify/pull/22), merged):
   - New datasets `beta_cdf` and `beta_sf` (1895 points each: the betainc
     a, b x 19 values of x from 0 to 1, including 1e-300 and the doubles
     nearest 1 - 1e-15 and 1, plus mean + k sd; tolerance 1e-12, betainc's;
@@ -295,25 +295,54 @@ _Updated at the end of every session. Start here._
     `beta_reg` unwraps an out-of-range error, in release builds too),
     7 endless loops, 125 wrong small quantiles, 186 small errors.
 
+- **Milestone 4, part 11: statrs F distribution** (statrs
+  `FisherSnedecor::cdf`, `sf`, `inverse_cdf`;
+  [PR #23](https://github.com/traderhall757-arch/rust-sci-verify/pull/23), open):
+  - New datasets `f_cdf` and `f_sf` (1999 points each: d1, d2 in {0.5, 1, 2,
+    5, 10, 30, 100, 1000, 1e5}, every pair, x 21 values of x from 0 to 1e300
+    plus 1 + k s around the bulk; tolerance 1e-12, betainc's; condition
+    number at most 1648 and prefix logarithm 1.05e6, both tested) and
+    `f_ppf` (1620 points: the same pairs x the betaincinv probabilities;
+    p = 1 tagged `pole`; 2e-13 from the largest |log x| 690.8, tested).
+    Reference: the continued fraction with z = d1 x / (d1 x + d2) and
+    y = d2 / (d1 x + d2) formed separately; the quantile is (d2/d1) e^s with
+    s = log(z / (1 - z)) from the betaincinv Newton iteration, factored out
+    as `_mp_betaincinv_logit` (betaincinv data unchanged). Tested against
+    `mpmath.betainc`, the series on the smaller tail, closed forms for
+    d1 = d2 = 1, d1 = 2, d2 = 2, and F(ppf(p)) = p. SciPy fails 6 cdf,
+    11 sf (up to 6.4e-11) and 101 ppf points (all with p <= 1e-100).
+  - `cdf` and `sf` fail 194 and 440 points: **finding 021** (high), approved
+    by Claude after the checklist. `sf` forms 1 - z from the rounded z, so it
+    is 0 once d1 x / d2 exceeds about 2^53 (117 points) and loses digits as x
+    grows (2.6% off at d1 = 1e5, d2 = 0.5, x = 1e10; 138% off the grid);
+    `beta_reg`'s 1e-15 cut-off gives exactly 1 next to the ends (20 points
+    each); finding 019's prefactor and the 140-iteration cap (which matters
+    for shapes near 5e4) cost up to 1.3e-9. All four causes confirmed with a
+    bit-exact switchable copy.
+  - `inverse_cdf` fails 724 of 1620: **finding 022** (high), approved by
+    Claude after the checklist. `inv_beta_reg`'s problems (finding 020):
+    162 panics, 7 endless loops, 345 errors in z; plus 210 upper quantiles
+    lost in `d2 / (d1 (1/z - 1))` even with the correctly rounded z (+inf,
+    values capped near 2^52 d2 / d1, 0.32% off at the median for d1 = 1e5,
+    d2 = 0.5).
+
 ## Next
 
-1. **Milestone 4, continued** (next session): more distributions and
-   crates, one family per PR. Suggested order: statrs FisherSnedecor
-   (its cdf is `beta_reg(d1/2, d2/2, d1 x / (d1 x + d2))`, so expect
-   finding 019's causes plus the rounding of that argument; its quantile
-   uses `inv_beta_reg`, finding 020; needs new `f_cdf`, `f_sf`, `f_ppf`
-   data), then Exponential, Erlang, InverseGamma through the gamma
-   functions; the generic `inverse_cdf` default that several distributions
-   share is a bisection with a relative 1e-14 test and `sf` in the upper
-   half, but also stops after 100 steps, so check its deep tails early;
-   then statrs hypothesis tests. Small follow-ups: run `gammaln` and
-   `gammainc_large` on statrs `ln_gamma` and `gamma_lr` and puruspe
-   `ln_gamma` and `gammp`; statrs also has `digamma` (run it on the new
-   `digamma` data; use `run_isolated` if it recurses); statrs `beta_reg`
-   itself on the three betainc datasets (same code as `Beta::cdf`).
-   Optional: check the K result of `Inu_Knu` on the `kv` grid (same code
-   path as finding 008).
-2. Nothing is submitted upstream until the whole project is done and tested
+1. **Owner: review and merge [PR #23](https://github.com/traderhall757-arch/rust-sci-verify/pull/23)** (statrs F distribution,
+   findings 021 and 022).
+2. **Milestone 4, continued** (next session): more distributions and
+   crates, one family per PR. Suggested order: Exponential, Erlang,
+   InverseGamma through the gamma functions; the generic `inverse_cdf`
+   default that several distributions share is a bisection with a relative
+   1e-14 test and `sf` in the upper half, but also stops after 100 steps,
+   so check its deep tails early; then statrs hypothesis tests. Small
+   follow-ups: run `gammaln` and `gammainc_large` on statrs `ln_gamma` and
+   `gamma_lr` and puruspe `ln_gamma` and `gammp`; statrs also has `digamma`
+   (run it on the new `digamma` data; use `run_isolated` if it recurses);
+   statrs `beta_reg` itself on the three betainc datasets (same code as
+   `Beta::cdf`). Optional: check the K result of `Inu_Knu` on the `kv` grid
+   (same code path as finding 008).
+3. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
    revised patch only when submission is approved.
@@ -322,7 +351,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 020 likewise.
+  007 to 022 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -365,8 +394,9 @@ _Updated at the end of every session. Start here._
   `gamma_cdf` + `gamma_sf` about 10 s; `betaincinv` about 5.5 minutes;
   `gammainc_large` about 1.5 minutes, `gammaln` and `gammasgn` about 2 s,
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
-  about 17 s together;
-  a full regeneration now takes about 20 minutes.
+  about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
+  about 6 minutes;
+  a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
 - `betainc_large` takes about a minute to generate (mpmath series at a, b = 1e5);

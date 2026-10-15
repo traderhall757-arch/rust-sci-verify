@@ -1328,7 +1328,18 @@ def _mp_betainc_tail(a: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf, y: mpmath.mpf,
 
 
 def _mp_betaincinv(a: mpmath.mpf, b: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
-    """The x with I_x(a, b) = p (0 <= p <= 1), by Newton's method on a logarithm.
+    """The x with I_x(a, b) = p (0 <= p <= 1): x = 1 / (1 + e^-s) with s from
+    _mp_betaincinv_logit; x = 0 at p = 0 and x = 1 at p = 1 (the ends of the support)."""
+    if p == 0 or p == 1:
+        return p
+    s = _mp_betaincinv_logit(a, b, p)
+    with mpmath.extradps(20):
+        return 1 / (1 + mpmath.exp(-s))
+
+
+def _mp_betaincinv_logit(a: mpmath.mpf, b: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """s = log(x / (1 - x)) for the x with I_x(a, b) = p (0 < p < 1), by
+    Newton's method on a logarithm.
 
     In s = log(x / (1 - x)) both x = 1 / (1 + e^-s) and 1 - x = 1 / (1 + e^s)
     keep full relative precision, so quantiles near 0 and near 1 are equally
@@ -1337,10 +1348,8 @@ def _mp_betaincinv(a: mpmath.mpf, b: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
     precision above 53 bits); both are smooth and monotone in s, with slope
     x^a (1-x)^b / (B(a, b) I) (respectively over 1 - I). Bracketing from the
     mean, bisection to within 1e-3 and then Newton's method, as for t_ppf
-    and gamma_ppf. The ends of the support: x = 0 at p = 0, x = 1 at p = 1.
+    and gamma_ppf.
     """
-    if p == 0 or p == 1:
-        return p
     lower = p <= mpmath.mpf(1) / 2
     q = p if lower else 1 - p
     sign = 1 if lower else -1
@@ -1380,7 +1389,7 @@ def _mp_betaincinv(a: mpmath.mpf, b: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
             step = sign * (mpmath.log(t) - log_q) / slope
             s -= step
             if abs(step) <= eps:
-                return 1 / (1 + mpmath.exp(-s))
+                return s
     raise ArithmeticError(f"betaincinv({a}, {b}, {p}) did not converge")
 
 
@@ -1521,6 +1530,176 @@ BETA_SF = Spec(
     mpmath_fn=_mp_beta_sf,
     scipy_name="scipy.stats.beta.sf",
     scipy_fn=lambda a, b, x: st.beta.sf(x, a, b),
+)
+
+# --- F distribution (Fisher-Snedecor) -----------------------------------------
+
+# Degrees of freedom d1, d2 (every pair): heavy tails (0.5, 1, 2), small and
+# moderate integers, and large values where F concentrates near 1. With
+# a = d1/2, b = d2/2 these are shapes the beta grid does not have.
+_F_DF = (0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 100.0, 1000.0, 1e5)
+_F_X = (0.0, 1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0,
+        100.0, 1e3, 1e5, 1e10, 1e20, 1e100, 1e300)  # fmt: skip
+_F_K = (-10, -3, -1, 1, 3, 10)
+
+
+def _f_x_grid() -> list[tuple[float, float, float]]:
+    points = set()
+    for d1, d2 in itertools.product(_F_DF, repeat=2):
+        points.update((d1, d2, x) for x in _F_X)
+        # Around 1 in steps of about the standard deviation of log F.
+        sd = math.sqrt(2 / d1 + 2 / d2)
+        points.update((d1, d2, x) for k in _F_K if (x := 1 + k * sd) > 0)
+    return sorted(points)
+
+
+def _mp_f_beta_args(d1: mpmath.mpf, d2: mpmath.mpf, x: mpmath.mpf):
+    """a = d1/2, b = d2/2, z = d1 x / (d1 x + d2) and y = 1 - z = d2 / (d1 x + d2):
+    F(x; d1, d2) = I_z(a, b) (A&S 26.6.2, DLMF 8.17 with the substitution
+    z = d1 x / (d1 x + d2)). z and y are formed separately, so neither loses
+    relative precision when the other is close to 1."""
+    t = d1 * x
+    return d1 / 2, d2 / 2, t / (t + d2), d2 / (t + d2)
+
+
+def _mp_f_cdf(d1: mpmath.mpf, d2: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x; d1, d2) for x >= 0, with full relative precision in both tails."""
+    if x == 0:
+        return mpmath.mpf(0)
+    return _mp_betainc_tail(*_mp_f_beta_args(d1, d2, x), lower=True)
+
+
+def _mp_f_sf(d1: mpmath.mpf, d2: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """1 - F(x; d1, d2) for x >= 0, with full relative precision in both tails."""
+    if x == 0:
+        return mpmath.mpf(1)
+    return _mp_betainc_tail(*_mp_f_beta_args(d1, d2, x), lower=False)
+
+
+def f_condition(d1: float, d2: float, x: float, upper: bool) -> mpmath.mpf:
+    """|x f(x) / F(x)| (upper: over 1 - F(x)): the relative change of F per
+    relative change of x, z or y. x f(x) = z^a y^b / B(a, b), so it is also the
+    beta prefix over the tail."""
+    d1, d2, x = mpmath.mpf(d1), mpmath.mpf(d2), mpmath.mpf(x)
+    a, b, z, y = _mp_f_beta_args(d1, d2, x)
+    prefix = mpmath.exp(a * mpmath.log(z) + b * mpmath.log(y) - mpmath.log(mpmath.beta(a, b)))
+    tail = _mp_f_sf(d1, d2, x) if upper else _mp_f_cdf(d1, d2, x)
+    return prefix / tail
+
+
+def _f_ppf_grid() -> list[tuple[float, float, float]]:
+    pairs = itertools.product(_F_DF, repeat=2)
+    return [(d1, d2, p) for d1, d2 in pairs for p in _BETAINCINV_P]
+
+
+def _f_ppf_tags(d1: float, d2: float, p: float) -> list[str]:
+    # The quantile is +inf at p = 1; at p = 0 it is 0, the end of the support.
+    return [POLE] if p == 1.0 else []
+
+
+def _mp_f_ppf(d1: mpmath.mpf, d2: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """The x with F(x; d1, d2) = p (0 <= p < 1).
+
+    With z = I^-1_p(d1/2, d2/2), x = (d2 / d1) z / (1 - z) = (d2 / d1) e^s for
+    s = log(z / (1 - z)) from _mp_betaincinv_logit, so neither z nor 1 - z is
+    rounded on the way and quantiles in both tails keep full relative precision.
+    """
+    if p == 0:
+        return mpmath.mpf(0)
+    s = _mp_betaincinv_logit(d1 / 2, d2 / 2, p)
+    with mpmath.extradps(20):
+        return d2 / d1 * mpmath.exp(s)
+
+
+_F_DF_DESCRIPTION = "d1, d2 in {0.5, 1, 2, 5, 10, 30, 100, 1000, 1e5} (every pair)"
+
+F_CDF = Spec(
+    name="f_cdf",
+    description=(
+        "F (Fisher-Snedecor) distribution cumulative distribution function F(x; d1, d2) "
+        "= I_z(d1/2, d2/2) with z = d1 x / (d1 x + d2)"
+    ),
+    inputs=("d1", "d2", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "Same function as betainc (F(x) = I_z(d1/2, d2/2)), so betainc's tolerance (accepted by "
+        "the owner, to be revisited). Two error sources: (1) forming "
+        "z = d1 x / (d1 x + d2) or y = 1 - z = d2 / (d1 x + d2) directly costs a few roundings, "
+        "which change F by the condition number |x f(x) / F(x)| (= z^a y^b / (B(a, b) F)) times "
+        "2^-53 each; its largest value at a normal result on this grid is 1648 (d1 = d2 = 1e5, "
+        "x = 0.937), so about 1.8e-13 per rounding. Forming y as 1 - z instead loses "
+        "2^-53 z / y relative to y, unbounded as x grows, and is not needed. (2) The prefix "
+        "z^a y^b / B(a, b) has logarithms up to 1.05e6 (ln Gamma(1e5) at d1 = d2 = 1e5); rounding "
+        "them separately costs up to 1.2e-10, combining them before rounding (Boost's "
+        "Lanczos-based prefix) does not, so 1e-12 demands the careful method. SciPy's worst error "
+        "at the points it gets within tolerance is 9.9e-13 (d1 = 1e5, d2 = 10, x = 0.553); it "
+        "fails 6: 1.1e-12 to 1.7e-12 at d1 = 1e5 with d2 = 10 or 30 (it forms z near 1 and "
+        "betainc rounds 1 - z), and 1 instead of 1 - 6.4e-11 at d1 = d2 = 1, x = 1e20 (the "
+        "closed form (2/pi) atan(sqrt x) confirms mpmath). x = 0 gives 0 exactly"
+    ),
+    grid_description=(
+        f"{_F_DF_DESCRIPTION} x x in {{0, 1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.1, "
+        "0.5, 1, 2, 5, 10, 100, 1e3, 1e5, 1e10, 1e20, 1e100, 1e300}, plus x = 1 + k s (rounded "
+        "to a double) for k in {-10, -3, -1, 1, 3, 10} where x > 0, s = sqrt(2/d1 + 2/d2) "
+        "(about the standard deviation of log F)"
+    ),
+    grid=_f_x_grid,
+    mpmath_fn=_mp_f_cdf,
+    scipy_name="scipy.stats.f.cdf",
+    scipy_fn=lambda d1, d2, x: st.f.cdf(x, d1, d2),
+)
+
+F_SF = Spec(
+    name="f_sf",
+    description="F (Fisher-Snedecor) distribution survival function 1 - F(x; d1, d2)",
+    inputs=("d1", "d2", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "1 - F, with f_cdf's tolerance for the same reasons: the condition number |x f / (1 - F)| "
+        "reaches 1549 at a normal result (d1 = d2 = 1e5, x = 1.063), about 1.7e-13 per rounding "
+        "of z or y, and the prefix logarithms reach 1.05e6, so separately rounded logarithms can "
+        "cost 1.2e-10. Computed from y = d2 / (d1 x + d2) directly, the upper tail keeps full "
+        "relative precision for every x, which this tolerance demands down to the smallest "
+        "normal double. SciPy's worst error at the points it gets within tolerance is 8.6e-13 "
+        "(d1 = 30, d2 = 1e5, x = 5); it fails 11: 1.0e-12 to 2.4e-12 at d2 = 1e5 with d1 = 10 or "
+        "30, and 1 instead of 1 - 6.4e-11 at d1 = d2 = 1, x = 1e-20 (the closed form confirms "
+        "mpmath)"
+    ),
+    grid_description="the f_cdf grid",
+    grid=_f_x_grid,
+    mpmath_fn=_mp_f_sf,
+    scipy_name="scipy.stats.f.sf",
+    scipy_fn=lambda d1, d2, x: st.f.sf(x, d1, d2),
+)
+
+F_PPF = Spec(
+    name="f_ppf",
+    description="F (Fisher-Snedecor) distribution quantile function F^-1(p; d1, d2)",
+    inputs=("d1", "d2", "p"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "d1, d2 and p are exact doubles and 1 - p is exact for p >= 1/2, but in the tails the "
+        "quantile is x = exp(L) with L of the order of log(p) / a (lower tail) or "
+        "-log(1 - p) / b (upper tail); rounding L (or 1/a, 1/b, d2/d1, which multiply it) to a "
+        "double changes x by |L| times 2^-53. The largest |L| at a positive, normal quantile on "
+        "this grid is 690.8 (d1 = 2, p = 1e-300, x = 1e-300), so up to 7.7e-14 is unavoidable; "
+        "2e-13 allows 2.6x that and matches betaincinv. SciPy's worst error at the points it "
+        "gets within tolerance is 1.8e-13 (d1 = d2 = 1000, p = 1e-100); it fails 101 points, "
+        "all with p <= 1e-100: NaN at 27 points, numbers from 1.1e-308 to 4.5e-303 "
+        "where the quantile is 0 or subnormal (41 points), and errors from 8.5e-12 to 911x at "
+        "33 points (e.g. 3e-5 instead of 6.7e-4 at d1 = 1e5, d2 = 1, p = 5e-324)"
+    ),
+    grid_description=(
+        f"{_F_DF_DESCRIPTION} x p in {{0, 5e-324, 1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, "
+        "0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999, and the doubles nearest 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15, 1}; the quantile is 0 at p = 0 (the end of the support) and "
+        "p = 1 is tagged pole (+inf); quantiles beyond the largest double are tagged overflow"
+    ),
+    grid=_f_ppf_grid,
+    mpmath_fn=_mp_f_ppf,
+    scipy_name="scipy.stats.f.ppf",
+    scipy_fn=lambda d1, d2, p: st.f.ppf(p, d1, d2),
+    input_tags=_f_ppf_tags,
 )
 
 # --- gammaln and gammasgn --------------------------------------------------
@@ -1789,5 +1968,6 @@ ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, BETAINCINV, BETA_CDF, BETA_SF,
+    F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip
