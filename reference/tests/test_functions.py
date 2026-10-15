@@ -779,6 +779,127 @@ def test_gamma_ppf_log_magnitude_matches_the_tolerance_reason():
     assert functions.GAMMA_PPF.tolerance >= 2 * worst * 2.0**-53
 
 
+@pytest.mark.parametrize(
+    ("a", "x"),
+    [(0.01, 1e-3), (0.5, 0.5), (1.0, 1 / 750), (5.0, 1 / 750), (50.0, 1e5), (1e3, 1 / 1948.6),
+     (1e4, 1e-4), (1e4, 1 / 13000), (3.0, 1e300)],
+)  # fmt: skip
+def test_invgamma_cdf_and_sf_match_mpmath_gammainc_at_the_reciprocal(a, x):
+    # F(x) = Q(a, 1/x) and 1 - F(x) = P(a, 1/x), by mpmath.gammainc (a different
+    # method from the series / continued fraction behind the datasets) with 1/x
+    # formed at 60 extra bits; includes the subnormal results SciPy flushes to 0
+    # (a = 5, x = 1/750 and a = 50, x = 1e5).
+    with mpmath.workdps(50):
+        a, x = mp(a, x)
+        with mpmath.extraprec(60):
+            t = 1 / x
+        q = mpmath.gammainc(a, t, mpmath.inf, regularized=True)
+        p = mpmath.gammainc(a, 0, t, regularized=True)
+        assert close(functions._mp_invgamma_cdf(a, x), q)
+        assert close(functions._mp_invgamma_sf(a, x), p)
+        assert close(functions._mp_invgamma_cdf(a, x) + functions._mp_invgamma_sf(a, x), 1)
+
+
+@pytest.mark.parametrize("x", [1e-3, 1 / 750, 0.5, 1.0, 3.0, 1e5, 1e300])
+def test_invgamma_cdf_and_sf_match_closed_forms_for_a_one_half_and_one(x):
+    # a = 1: F = e^(-1/x), 1 - F = -expm1(-1/x); a = 1/2: F = erfc(1/sqrt(x)),
+    # 1 - F = erf(1/sqrt(x)).
+    with mpmath.workdps(50):
+        (x,) = mp(x)
+        one, half = mpmath.mpf(1), mpmath.mpf(1) / 2
+        assert close(functions._mp_invgamma_cdf(one, x), mpmath.exp(-1 / x))
+        assert close(functions._mp_invgamma_sf(one, x), -mpmath.expm1(-1 / x))
+        assert close(functions._mp_invgamma_cdf(half, x), mpmath.erfc(1 / mpmath.sqrt(x)))
+        assert close(functions._mp_invgamma_sf(half, x), mpmath.erf(1 / mpmath.sqrt(x)))
+
+
+def test_invgamma_cdf_and_sf_cover_the_ends():
+    with mpmath.workdps(50):
+        for a in mp(0.01, 3.0, 1e4):
+            assert functions._mp_invgamma_cdf(a, mpmath.mpf(0)) == 0
+            assert functions._mp_invgamma_sf(a, mpmath.mpf(0)) == 1
+            # Where 1/x overflows a double the cdf still rounds to 0 and the sf to 1
+            # (only the rounded double matters there: e^(-1/x) is about 10^(-4e309)).
+            assert functions._mp_invgamma_cdf(a, mpmath.mpf(5e-324)) < mpmath.mpf(2) ** -1075
+            assert 1 - functions._mp_invgamma_sf(a, mpmath.mpf(1e-310)) < mpmath.mpf(2) ** -54
+
+
+@pytest.mark.parametrize(
+    ("a", "p"),
+    [(0.01, 5e-324), (0.1, 1 - 1e-15), (0.5, 5e-324), (0.5, 1 - 1e-15), (1.0, 1e-300),
+     (3.0, 0.5), (5.0, 5e-324), (1e3, 5e-324), (1e4, 5e-324), (1e4, 0.5000000001),
+     (0.01, 0.999)],
+)  # fmt: skip
+def test_invgamma_ppf_inverts_the_cdf(a, p):
+    # F(ppf(p)) = p, or 1 - F(ppf(p)) = 1 - p in the upper half (1 - p is exact
+    # at 50 digits), with F by mpmath.gammainc at 1/x; includes every kind of
+    # point where SciPy or statrs is off (p = 5e-324, 1 - 1e-15 for small a).
+    with mpmath.workdps(50):
+        a, p = mp(a, p)
+        x = functions._mp_invgamma_ppf(a, p)
+        t = 1 / x
+        if p <= 0.5:
+            assert close(mpmath.gammainc(a, t, mpmath.inf, regularized=True), p)
+        else:
+            assert close(mpmath.gammainc(a, 0, t, regularized=True), 1 - p)
+
+
+@pytest.mark.parametrize("p", [5e-324, 1e-300, 1e-10, 0.25, 0.5, 0.75, 1 - 1e-15])
+def test_invgamma_ppf_matches_the_closed_form_for_a_one(p):
+    # a = 1: F(x) = e^(-1/x), so x = -1 / log(p); log(p) is exact enough for the
+    # double p at 60 digits, also next to 1.
+    with mpmath.workdps(60):
+        (p,) = mp(p)
+        assert close(functions._mp_invgamma_ppf(mpmath.mpf(1), p), -1 / mpmath.log(p))
+    assert functions._mp_invgamma_ppf(mpmath.mpf(3), mpmath.mpf(0)) == 0
+
+
+@pytest.mark.parametrize(
+    ("spec", "condition"),
+    [
+        (functions.INVGAMMA_CDF, functions.invgamma_cdf_condition),
+        (functions.INVGAMMA_SF, functions.invgamma_sf_condition),
+    ],
+)
+def test_invgamma_condition_numbers_match_the_tolerance_reason(spec, condition):
+    # The largest condition number at a normal, nonzero point is 3.0e3 at
+    # a = 1e4, near 1/x = a -+ 30 sqrt(a): rounding 1/x costs at most 3.4e-13
+    # there, inside the tolerance, while gamma's a = 1e5 and 1e6 would cost
+    # 1.1e-12 and 3.3e-12, beyond it.
+    with mpmath.workdps(30):
+        worst, a = max(
+            (condition(a, x), a)
+            for a, x in spec.grid()
+            if x > 0 and spec.mpmath_fn(mpmath.mpf(a), mpmath.mpf(x)) >= mpmath.mpf(2) ** -1022
+        )
+        assert a == 1e4
+        assert 3.0e3 < worst < 3.01e3
+        assert worst * 2.0**-53 < 3.4e-13 < spec.tolerance
+        for big, low, high in ((1e5, 1.0e-12, 1.1e-12), (1e6, 3.2e-12, 3.4e-12)):
+            k30 = condition(big, 1 / (big + 30 * math.sqrt(big)))
+            k30 = max(k30, condition(big, 1 / (big - 30 * math.sqrt(big))))
+            assert low < k30 * 2.0**-53 < high
+            assert k30 * 2.0**-53 > spec.tolerance
+
+
+def test_invgamma_ppf_log_magnitude_matches_the_tolerance_reason():
+    # The largest |log x| at a finite, normal quantile of the committed data
+    # (a = 0.01, p = 0.999, x = 1.8e300), against the tolerance's 2 |L| 2^-53 bound.
+    data = Path(__file__).resolve().parent.parent / "data" / "invgamma_ppf.jsonl"
+    rows = [json.loads(line) for line in data.read_text().splitlines()[1:]]
+    logs = [
+        (abs(math.log(y)), r["in"]["a"][0], r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags")
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= y < math.inf
+    ]
+    worst, a, p = max(logs)
+    assert (a, p) == (0.01, 0.999)
+    assert 691.3 < worst < 691.4
+    assert functions.INVGAMMA_PPF.tolerance >= 2 * worst * 2.0**-53
+
+
 @pytest.mark.parametrize("x", [5e-324, 1e-300, 1e-16, 1e-5, 0.5, 1.0, 37.5, 708.5, 745.0])
 def test_expon_cdf_and_sf_match_the_gamma_routes_and_the_series(x):
     # The exponential distribution is the gamma distribution with shape 1:

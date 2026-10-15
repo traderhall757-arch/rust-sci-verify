@@ -4,7 +4,8 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 
 use crate::expected;
 use statrs::distribution::{
-    Beta, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, Normal, StudentsT,
+    Beta, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, InverseGamma, Normal,
+    StudentsT,
 };
 use statrs::function::{erf, gamma};
 
@@ -37,6 +38,12 @@ fn gamma_dist(a: f64) -> Gamma {
 /// a subnormal quantile, where errors are judged relative to 2.2e-308 anyway.
 fn chi_squared(a: f64) -> ChiSquared {
     ChiSquared::new(2.0 * a).expect("valid parameters")
+}
+
+/// The inverse gamma distribution with shape `a` and rate 1 (the reference
+/// data's parametrisation).
+fn inverse_gamma(a: f64) -> InverseGamma {
+    InverseGamma::new(a, 1.0).expect("valid parameters")
 }
 
 /// The exponential distribution with rate 1 (the reference data's).
@@ -220,6 +227,49 @@ fn statrs_matches_reference() {
         }
         .run_with_time_limit(TIME_LIMIT, |p| {
             Outcome::scalar(chi_squared(p.scalar("a")).inverse_cdf(p.scalar("p")) / 2.0)
+        }),
+        Check {
+            function: "statrs::distribution::InverseGamma::cdf",
+            dataset: "invgamma_cdf",
+            expected: &[
+                Expected {
+                    finding: "012-statrs-gamma-cdf",
+                    points: expected::INVGAMMA_CDF,
+                },
+                Expected {
+                    finding: "024-statrs-inverse-gamma-cdf",
+                    points: expected::INVGAMMA_TINY_X,
+                },
+            ],
+        }
+        .run(|p| Outcome::scalar(inverse_gamma(p.scalar("a")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::InverseGamma::sf",
+            dataset: "invgamma_sf",
+            expected: &[
+                Expected {
+                    finding: "012-statrs-gamma-cdf",
+                    points: expected::INVGAMMA_SF,
+                },
+                Expected {
+                    finding: "024-statrs-inverse-gamma-cdf",
+                    points: expected::INVGAMMA_TINY_X,
+                },
+            ],
+        }
+        .run(|p| Outcome::scalar(inverse_gamma(p.scalar("a")).sf(p.scalar("x")))),
+        // Time-limited like `Gamma::inverse_cdf`: the series and continued
+        // fraction inside `cdf` have no iteration limit.
+        Check {
+            function: "statrs::distribution::InverseGamma::inverse_cdf",
+            dataset: "invgamma_ppf",
+            expected: &[Expected {
+                finding: "025-statrs-inverse-gamma-inverse-cdf",
+                points: expected::INVGAMMA_PPF,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| {
+            Outcome::scalar(inverse_gamma(p.scalar("a")).inverse_cdf(p.scalar("p")))
         }),
         Check {
             function: "statrs::distribution::Exp::cdf",

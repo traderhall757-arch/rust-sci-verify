@@ -1159,20 +1159,29 @@ def _gamma_ppf_tags(a: float, p: float) -> list[str]:
 
 
 def _mp_gamma_ppf(a: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
-    """The x with P(a, x) = p (0 < p < 1), by Newton's method on a logarithm.
-
-    For p <= 1/2 the root of log P(a, e^u) = log p, for p > 1/2 the root of
-    log Q(a, e^u) = log(1 - p) (1 - p is exact for a double p at any working
-    precision above 53 bits). In u = log x both sides are smooth and monotone,
-    with slopes x f / P and -x f / Q. The search starts from the
-    Wilson-Hilferty approximation (or, where that is not positive, from the
-    lower-tail power law P = x^a / Gamma(a + 1)), brackets the root, bisects
-    to within 1e-3 and then converges quadratically. ppf(0) = 0.
-    """
+    """The x with P(a, x) = p (0 <= p < 1): _mp_gamma_quantile on the lower tail
+    for p <= 1/2 and on the upper tail, 1 - p (exact for a double p at any
+    working precision above 53 bits), above. ppf(0) = 0."""
     if p == 0:
         return mpmath.mpf(0)
     lower = p <= mpmath.mpf(1) / 2
-    q = p if lower else 1 - p
+    with mpmath.extradps(20):
+        z = -mpmath.sqrt(2) * mpmath.erfinv(1 - 2 * p)  # the normal quantile
+    return _mp_gamma_quantile(a, p if lower else 1 - p, lower, z)
+
+
+def _mp_gamma_quantile(a: mpmath.mpf, q: mpmath.mpf, lower: bool, z: mpmath.mpf) -> mpmath.mpf:
+    """The x with P(a, x) = q (lower) or Q(a, x) = q (upper), 0 < q <= 1/2, by
+    Newton's method on a logarithm.
+
+    The root of log P(a, e^u) = log q, or of log Q(a, e^u) = log q. In u = log x
+    both sides are smooth and monotone, with slopes x f / P and -x f / Q. The
+    search starts from the Wilson-Hilferty approximation with z, the normal
+    quantile of P(a, x) (or, where that is not positive, from the lower-tail
+    power law P = x^a / Gamma(a + 1); where z is +inf because P(a, x) = 1 - q
+    rounds to 1, from x = a - log q, about where Q = q), brackets the root,
+    bisects to within 1e-3 and then converges quadratically.
+    """
     sign = 1 if lower else -1
     eps = mpmath.mpf(10) ** (-mpmath.mp.dps - 5)
     with mpmath.extradps(20):
@@ -1184,9 +1193,13 @@ def _mp_gamma_ppf(a: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
             tail = _mp_gamma_cdf(a, x) if lower else _mp_gamma_sf(a, x)
             return sign * (mpmath.log(tail) - log_q)
 
-        z = -mpmath.sqrt(2) * mpmath.erfinv(1 - 2 * p)  # the normal quantile
         w = 1 - 1 / (9 * a) + z / (3 * mpmath.sqrt(a))
-        u0 = 3 * mpmath.log(w) + mpmath.log(a) if w > 0 else (log_q + mpmath.loggamma(a + 1)) / a
+        if w == mpmath.inf:
+            u0 = mpmath.log(a - log_q)
+        elif w > 0:
+            u0 = 3 * mpmath.log(w) + mpmath.log(a)
+        else:
+            u0 = (log_q + mpmath.loggamma(a + 1)) / a
         lo = hi = u0
         step = mpmath.mpf(1) / 1000
         while g(lo) > 0:
@@ -1210,7 +1223,7 @@ def _mp_gamma_ppf(a: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
             u -= step
             if abs(step) <= eps:
                 return mpmath.exp(u)
-    raise ArithmeticError(f"gamma_ppf({a}, {p}) did not converge")
+    raise ArithmeticError(f"gamma quantile ({a}, {q}, lower={lower}) did not converge")
 
 
 _GAMMA_A_DESCRIPTION = "a in {0.01, 0.1, 0.5, 1, 1.5, 2, 3, 5, 10, 20, 50, 100, 1e3, 1e4, 1e5, 1e6}"
@@ -1298,6 +1311,158 @@ GAMMA_PPF = Spec(
     mpmath_fn=_mp_gamma_ppf,
     scipy_name="scipy.stats.gamma.ppf",
     scipy_fn=lambda a, p: st.gamma.ppf(p, a),
+    input_tags=_gamma_ppf_tags,
+)
+
+# --- inverse gamma distribution (shape a, rate 1) -----------------------------
+
+# X is inverse gamma with shape a and rate 1 exactly when T = 1 / X is gamma
+# with shape a and rate 1, so F(x) = Q(a, 1/x), 1 - F(x) = P(a, 1/x) and the
+# quantile is 1 / (the gamma quantile at 1 - p). Shapes up to 1e4: see the
+# tolerance reason. a = 150 was added after an off-grid scan: from about
+# a = 108 to 171, x^(-a-1) overflows a double at the bulk's x while Gamma(a)
+# does not, so a density formed as x^(-a-1) e^(-1/x) / Gamma(a) is inf or NaN.
+_INVGAMMA_A = tuple(sorted({a for a in _GAMMA_A if a <= 1e4} | {150.0}))
+
+
+def _invgamma_x_grid() -> list[tuple[float, float]]:
+    # The reciprocals (rounded to doubles) of the gamma_cdf grid's t, so that
+    # 1/x visits the same places, plus 0 and two x where 1/x overflows a double.
+    points = set()
+    for a in _INVGAMMA_A:
+        ts = [t for t in _GAMMA_X if t > 0]
+        ts += [t for k in _GAMMA_K if (t := a + k * math.sqrt(a)) > 0]
+        points.update((a, 1 / t) for t in ts)
+        points.update((a, x) for x in (0.0, 5e-324, 1e-310))
+    return sorted(points)
+
+
+def _mp_reciprocal(x: mpmath.mpf) -> mpmath.mpf:
+    # 1/x with 60 extra bits, so rounding it costs nothing at the working precision.
+    with mpmath.extraprec(60):
+        return 1 / x
+
+
+def _mp_invgamma_cdf(a: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = Q(a, 1/x) (shape a, rate 1), 0 for x <= 0."""
+    return _mp_gamma_sf(a, _mp_reciprocal(x)) if x > 0 else mpmath.mpf(0)
+
+
+def _mp_invgamma_sf(a: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """1 - F(x) = P(a, 1/x) (shape a, rate 1), 1 for x <= 0."""
+    return _mp_gamma_cdf(a, _mp_reciprocal(x)) if x > 0 else mpmath.mpf(1)
+
+
+def invgamma_cdf_condition(a: float, x: float) -> mpmath.mpf:
+    """|x f(x) / F(x)|, which equals gamma_sf_condition at t = 1/x: F(x) = Q(a, 1/x)
+    and d log F / d log x = -d log Q / d log t."""
+    return gamma_sf_condition(a, _mp_reciprocal(mpmath.mpf(x)))
+
+
+def invgamma_sf_condition(a: float, x: float) -> mpmath.mpf:
+    """|x f(x) / (1 - F(x))| = gamma_cdf_condition at t = 1/x."""
+    return gamma_cdf_condition(a, _mp_reciprocal(mpmath.mpf(x)))
+
+
+def _invgamma_ppf_grid() -> list[tuple[float, float]]:
+    ps = sorted({p for _, p in _gamma_ppf_grid()})
+    return [(a, p) for a in _INVGAMMA_A for p in ps]
+
+
+def _mp_invgamma_ppf(a: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """The x with F(x) = Q(a, 1/x) = p (0 <= p < 1): x = 1/t, with t the gamma
+    quantile on the upper tail Q(a, t) = p for p <= 1/2 and on the lower tail
+    P(a, t) = 1 - p above (1 - p exact). ppf(0) = 0, the end of the support."""
+    if p == 0:
+        return mpmath.mpf(0)
+    upper = p <= mpmath.mpf(1) / 2
+    with mpmath.extradps(20):
+        # The normal quantile of P(a, t) = 1 - p; +inf where 1 - 2p rounds to 1.
+        z = mpmath.sqrt(2) * mpmath.erfinv(1 - 2 * p)
+    t = _mp_gamma_quantile(a, p if upper else 1 - p, not upper, z)
+    return _mp_reciprocal(t)
+
+
+_INVGAMMA_A_DESCRIPTION = "a in {0.01, 0.1, 0.5, 1, 1.5, 2, 3, 5, 10, 20, 50, 100, 150, 1e3, 1e4}"
+_INVGAMMA_TOLERANCE_REASON = (
+    "F(x) = Q(a, 1/x) and 1 - F(x) = P(a, 1/x), the functions of gamma_sf and gamma_cdf, so "
+    "they get gamma's tolerance 1e-12, and the condition number |x f(x) / F(x)| is gamma's at "
+    "t = 1/x. Unlike gamma's x, t = 1/x is not an exact double: rounding it (as SciPy, Boost "
+    "and statrs all do) costs the condition number times 2^-53. Shapes stop at 1e4, where the "
+    "largest condition number at a normal result is 3.0e3 (t = a -+ 30 sqrt(a)) and rounding "
+    "costs at most 3.4e-13; at gamma's a = 1e5 and 1e6 it would cost 1.1e-12 and 3.3e-12, "
+    "beyond the tolerance, so a correct method that rounds 1/x would fail there. Results below "
+    "2.2e-308 are judged relative to that number (conventions). SciPy's worst error here is "
+    "7.5e-13 (cdf, a = 1e3, x = 1/(a + 30 sqrt(a))), except one subnormal result flushed to 0 "
+    "in each function (cdf at a = 5, x = 1/750; sf at a = 50, x = 1/1e-5)"
+)
+_INVGAMMA_X_DESCRIPTION = (
+    f"{_INVGAMMA_A_DESCRIPTION} x x = 1/t (rounded to a double) for t in {{1e-300, 1e-100, "
+    "1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 700, 750, "
+    "1e3, 1e4, 1e5, 1e6, 1e7, 1e10, 1e300} and t = a + k sqrt(a) (rounded to a double first) "
+    "for k in {-30, -10, -3, -1, 1, 3, 10, 30} where positive, plus x = 0, 5e-324 and 1e-310 "
+    "(where 1/x overflows a double)"
+)
+
+INVGAMMA_CDF = Spec(
+    name="invgamma_cdf",
+    description=(
+        "Inverse gamma distribution cumulative distribution function Q(a, 1/x) (shape a, rate 1)"
+    ),
+    inputs=("a", "x"),
+    tolerance=1e-12,
+    tolerance_reason=_INVGAMMA_TOLERANCE_REASON,
+    grid_description=_INVGAMMA_X_DESCRIPTION,
+    grid=_invgamma_x_grid,
+    mpmath_fn=_mp_invgamma_cdf,
+    scipy_name="scipy.stats.invgamma.cdf",
+    scipy_fn=lambda a, x: st.invgamma.cdf(x, a),
+)
+
+INVGAMMA_SF = Spec(
+    name="invgamma_sf",
+    description=(
+        "Inverse gamma distribution survival function P(a, 1/x) = 1 - F(x) (shape a, rate 1)"
+    ),
+    inputs=("a", "x"),
+    tolerance=1e-12,
+    tolerance_reason=_INVGAMMA_TOLERANCE_REASON,
+    grid_description=f"the invgamma_cdf grid: {_INVGAMMA_X_DESCRIPTION}",
+    grid=_invgamma_x_grid,
+    mpmath_fn=_mp_invgamma_sf,
+    scipy_name="scipy.stats.invgamma.sf",
+    scipy_fn=lambda a, x: st.invgamma.sf(x, a),
+)
+
+INVGAMMA_PPF = Spec(
+    name="invgamma_ppf",
+    description=(
+        "Inverse gamma distribution quantile function, the x with Q(a, 1/x) = p "
+        "(shape a, rate 1); the reciprocal of the gamma quantile at 1 - p"
+    ),
+    inputs=("a", "p"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "As for gamma_ppf: the quantile is x = 1/t with t = exp(L), and rounding L (or 1/a, which "
+        "multiplies it in the gamma lower tail) to a double changes x by |log x| times 2^-53. "
+        "The largest |log x| at a finite, normal quantile on this grid is 691.3 (a = 0.01, "
+        "p = 0.999, x = 1.8e300), so up to 7.7e-14 is unavoidable; 2e-13 allows 2.6x that "
+        "and matches gamma_ppf. Quantiles above the largest double are tagged overflow. SciPy "
+        "fails 11 of the 15 points with p = 5e-324 (5.5e-13 to 1.6e-4 off; it is right at "
+        "a = 1, 1.5, 2 and 3) and no other point"
+    ),
+    grid_description=(
+        f"{_INVGAMMA_A_DESCRIPTION} x the gamma_ppf probabilities p in {{0, 5e-324, 1e-300, "
+        "1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, 1/2 - 1e-10, 1/2, "
+        "1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, 0.99, 0.999, and the doubles nearest 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15, 1}; the quantile is 0 at p = 0 (the end of the support) and "
+        "p = 1 is tagged pole (+inf); for small a the upper quantiles are above the largest "
+        "double"
+    ),
+    grid=_invgamma_ppf_grid,
+    mpmath_fn=_mp_invgamma_ppf,
+    scipy_name="scipy.stats.invgamma.ppf",
+    scipy_fn=lambda a, p: st.invgamma.ppf(p, a),
     input_tags=_gamma_ppf_tags,
 )
 
@@ -2094,7 +2259,8 @@ TRIGAMMA = Spec(
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
-    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
+    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
+    INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
     BETAINCINV, BETA_CDF, BETA_SF,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
