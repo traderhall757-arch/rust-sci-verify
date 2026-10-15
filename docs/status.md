@@ -517,7 +517,8 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 20: puruspe gamma, gammq, and gammp on the
   distribution data** (follow-up; `puruspe::gamma` on `gamma`,
-  `puruspe::gammq` on `gamma_sf`, `puruspe::gammp` on `gamma_cdf`; PR open):
+  `puruspe::gammq` on `gamma_sf`, `puruspe::gammp` on `gamma_cdf`;
+  [PR #33](https://github.com/traderhall757-arch/rust-sci-verify/pull/33), open):
   - `gamma` (the Fukushima port) passes all 901 points (worst 1.5e-15).
   - `gammq` fails 223 of 538. **Finding 034** (high), approved by Claude after
     the checklist, covers 180: it returns 0 for every x > a + 20 (sqrt(a) + 1)
