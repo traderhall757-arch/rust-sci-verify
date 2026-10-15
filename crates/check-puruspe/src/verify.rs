@@ -82,6 +82,42 @@ fn puruspe_matches_reference() {
         }
         .run(|p| Outcome::scalar(puruspe::gammp(p.scalar("a"), p.scalar("x")))),
         Check {
+            function: "puruspe::gammp",
+            dataset: "gamma_cdf",
+            expected: &[
+                Expected {
+                    finding: "002-puruspe-gammp",
+                    points: expected::GAMMP_CDF,
+                },
+                Expected {
+                    finding: "034-puruspe-gammq",
+                    points: expected::GAMMP_CDF_TINY_X,
+                },
+            ],
+        }
+        .run(|p| Outcome::scalar(puruspe::gammp(p.scalar("a"), p.scalar("x")))),
+        Check {
+            function: "puruspe::gammq",
+            dataset: "gamma_sf",
+            expected: &[
+                Expected {
+                    finding: "002-puruspe-gammp",
+                    points: expected::GAMMQ_APPROX,
+                },
+                Expected {
+                    finding: "034-puruspe-gammq",
+                    points: expected::GAMMQ,
+                },
+            ],
+        }
+        .run(|p| Outcome::scalar(puruspe::gammq(p.scalar("a"), p.scalar("x")))),
+        Check {
+            function: "puruspe::gamma",
+            dataset: "gamma",
+            expected: &[],
+        }
+        .run(|p| Outcome::scalar(puruspe::gamma(p.scalar("x")))),
+        Check {
             function: "puruspe::ln_gamma",
             dataset: "gammaln",
             expected: &[Expected {
