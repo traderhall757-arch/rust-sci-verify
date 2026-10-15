@@ -498,7 +498,8 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 19: puruspe ln_gamma and gammp for large shapes**
   (follow-up; `puruspe::ln_gamma` on `gammaln`, `puruspe::gammp` on
-  `gammainc_large`; PR open):
+  `gammainc_large`;
+  [PR #32](https://github.com/traderhall757-arch/rust-sci-verify/pull/32), open):
   - `ln_gamma` runs on the 877 `gammaln` points where Gamma(x) > 0 or x is
     a pole (as for statrs) and fails 666: **finding 033** (high), approved
     by Claude after the checklist. No reflection formula (NaN below -4.5,
