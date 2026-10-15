@@ -222,7 +222,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 8: the `special` crate, gamma family** (special
   0.14.2 `Gamma::gamma`, `ln_gamma`, `inc_gamma`;
-  [PR #20](https://github.com/traderhall757-arch/rust-sci-verify/pull/20), open):
+  [PR #20](https://github.com/traderhall757-arch/rust-sci-verify/pull/20), merged):
   - New datasets `gammaln` (956 points: the `gamma` grid, decades to 1e300,
     the overflow edge near 2.55e305, 1 +- d and 2 +- d for d = 1e-5..1e-15,
     large negative non-integers; 2e-13 from the reflection formula's
@@ -241,21 +241,51 @@ _Updated at the end of every session. Start here._
     the grid, 1.2e-9 at 1e6, 2.0e-7 at 1e8); subnormal results flushed to 0.
     All three causes confirmed with a switchable copy.
 
+- **Milestone 4, part 9: the `special` crate, digamma and trigamma** (special
+  0.14.2 `Gamma::digamma`, `Gamma::trigamma`;
+  [PR #21](https://github.com/traderhall757-arch/rust-sci-verify/pull/21), open):
+  - Harness: new `Check::run_isolated` and `Outcome::Crash` ("crash: stack
+    overflow", always crate wrong; `docs/conventions.md`, "Calls that end the
+    process"). A stack overflow aborts the process and cannot be caught, so
+    such a check evaluates its points in child processes (the same test
+    executable running only that check); a dead child's point is recorded and
+    a new child continues at the next point. The check goes first in its test.
+  - New datasets `digamma` (949 points: the `gammaln` grid's ranges plus the
+    double nearest the zero x0 = 1.4616 and x0 +- 1e-5, 1e-10; tolerance
+    4e-13 from the reflection formula's cancellation, 1313x at x = -22.75,
+    where SciPy's error is 2.8e-13; tested) and `trigamma` (943 points, 1e-13;
+    reference uses the reflection formula with `sinpi` for x < 0 because
+    `mpmath.psi(1, x)` recurs one unit at a time from negative x; x =
+    -999999999999999.5 left out because SciPy's `polygamma(1, x)` never
+    returns there). SciPy passes every point of both.
+  - `digamma` fails 7 points: **finding 017** (high), approved by Claude after
+    the checklist. It recurses once per unit below 8, so it overflows the stack
+    and aborts the process for large negative x (from about -1e5 in debug,
+    -2e5 in release, on an 8 MiB stack; always below -2^53 and at -inf); and it
+    loses all digits next to its zero (wrong sign at the nearest double, up to
+    2.1e-3 away off the grid): plain cancellation, no expansion around x0 as
+    in Boost and SciPy.
+  - `trigamma` fails 31 points: **finding 018** (high), approved by Claude
+    after the checklist. Finite at every negative-integer pole, and an error
+    growing with |x| for negative x (4.8e-13 at -1000.25, 90x near -1e15):
+    `sin(pi x)` of a rounded `pi x`. Confirmed: a `sinpi` removes every
+    failure (0 of 5,111) and gives +inf at the poles.
+
 ## Next
 
 1. **Milestone 4, continued** (next session): more distributions and
-   crates, one family per PR. Suggested order: `special`'s digamma and
-   trigamma (need new datasets `digamma`, `trigamma`; mpmath `psi`), then
-   the remaining statrs continuous distributions that reuse checked code
-   (Beta and FisherSnedecor through `beta_reg`, whose inverse `betaincinv`
-   data now exists; Exponential, Erlang, InverseGamma through the gamma
-   functions; the generic `inverse_cdf` default that several distributions
-   share is a bisection with a relative 1e-14 test and `sf` in the upper
-   half, but also stops after 100 steps, so check its deep tails early),
-   then statrs hypothesis tests. `gammaln` and `gammainc_large` can also be
-   run on statrs `ln_gamma` and `gamma_lr` and puruspe `ln_gamma` and `gammp`
-   (small follow-up). Optional: check the K result of `Inu_Knu` on the `kv`
-   grid (same code path as finding 008).
+   crates, one family per PR. Suggested order: the remaining statrs
+   continuous distributions that reuse checked code (Beta and
+   FisherSnedecor through `beta_reg`, whose inverse `betaincinv` data
+   exists; Exponential, Erlang, InverseGamma through the gamma functions;
+   the generic `inverse_cdf` default that several distributions share is a
+   bisection with a relative 1e-14 test and `sf` in the upper half, but also
+   stops after 100 steps, so check its deep tails early), then statrs
+   hypothesis tests. Small follow-ups: run `gammaln` and `gammainc_large` on
+   statrs `ln_gamma` and `gamma_lr` and puruspe `ln_gamma` and `gammp`;
+   statrs also has `digamma` (run it on the new `digamma` data; use
+   `run_isolated` if it recurses). Optional: check the K result of
+   `Inu_Knu` on the `kv` grid (same code path as finding 008).
 2. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
@@ -265,7 +295,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 016 likewise.
+  007 to 018 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -306,7 +336,8 @@ _Updated at the end of every session. Start here._
   continued fraction, at 50 and 100 digits) and `t_cdf` + `t_sf` about
   7 s; `gamma_ppf` about 5.5 minutes (2 of them at a = 1e6) and
   `gamma_cdf` + `gamma_sf` about 10 s; `betaincinv` about 5.5 minutes;
-  `gammainc_large` about 1.5 minutes, `gammaln` and `gammasgn` about 2 s;
+  `gammainc_large` about 1.5 minutes, `gammaln` and `gammasgn` about 2 s,
+  `digamma` and `trigamma` about 3 s together;
   a full regeneration now takes about 20 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
