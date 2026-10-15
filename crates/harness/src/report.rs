@@ -45,6 +45,7 @@ fn outcome(o: &Outcome) -> String {
         Outcome::Error(e) => format!("error: {e}"),
         Outcome::Panic(e) => format!("panic: {e}"),
         Outcome::Timeout(limit) => format!("no result within {} s", limit.as_secs_f64()),
+        Outcome::Crash(e) => format!("crash: {e}"),
     }
 }
 
@@ -268,6 +269,10 @@ mod tests {
         assert_eq!(
             outcome(&Outcome::Timeout(std::time::Duration::from_secs(5))),
             "no result within 5 s"
+        );
+        assert_eq!(
+            outcome(&Outcome::Crash("stack overflow".into())),
+            "crash: stack overflow"
         );
     }
 

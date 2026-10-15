@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::compare::{Verdict, classify};
 use crate::data::{Dataset, Header, Point};
+use crate::isolated;
 
 /// What the target crate returned at one point.
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +23,9 @@ pub enum Outcome {
     /// [`Check::run_with_time_limit`] (e.g. an endless loop); always counted
     /// as crate wrong.
     Timeout(Duration),
+    /// The process evaluating this point died, e.g. aborted on a stack
+    /// overflow, in [`Check::run_isolated`]; always counted as crate wrong.
+    Crash(String),
 }
 
 impl Outcome {
@@ -120,6 +124,9 @@ impl Check {
     /// Evaluates `f` at every point of an already loaded dataset.
     #[must_use]
     pub fn run_on(self, data: Dataset, f: impl Fn(&Point) -> Outcome) -> FunctionResult {
+        if isolated::in_child() {
+            return self.judge(data, Vec::new());
+        }
         let outcomes = silenced_panics(|| {
             data.points
                 .iter()
@@ -164,6 +171,9 @@ impl Check {
         limit: Duration,
         f: impl Fn(&Point) -> Outcome + Send + Sync + 'static,
     ) -> FunctionResult {
+        if isolated::in_child() {
+            return self.judge(data, Vec::new());
+        }
         let f = Arc::new(f);
         let outcomes = silenced_panics(|| {
             let deadline = Instant::now() + limit;
@@ -190,6 +200,59 @@ impl Check {
                 })
                 .collect()
         });
+        self.judge(data, outcomes)
+    }
+
+    /// Like [`Check::run`], but the points are evaluated in child processes,
+    /// so a call that ends the process (a stack overflow aborts it) gets
+    /// [`Outcome::Crash`] and the run continues at the next point; a point
+    /// with no result within `limit` of the previous one gets
+    /// [`Outcome::Timeout`].
+    ///
+    /// Each child is the current test executable running only `test`, the
+    /// calling test's full name (e.g. `verify::special_matches_reference`),
+    /// and evaluates this check alone: every other check in that test
+    /// returns no points there, and the child exits once this check is done.
+    /// Put the check first in its test, so that the checks before it, though
+    /// skipped, do not even load their data again in every child.
+    ///
+    /// # Panics
+    ///
+    /// If the dataset cannot be loaded, a child cannot be started, or a child
+    /// never reaches this check (e.g. a wrong `test`).
+    #[must_use]
+    pub fn run_isolated(
+        self,
+        test: &str,
+        limit: Duration,
+        f: impl Fn(&Point) -> Outcome,
+    ) -> FunctionResult {
+        let data = Dataset::load(&crate::workspace_root(), self.dataset)
+            .unwrap_or_else(|e| panic!("{}: {e}", self.dataset));
+        self.run_on_isolated(data, test, limit, f)
+    }
+
+    /// [`Check::run_isolated`] on an already loaded dataset; the child must
+    /// build the same dataset.
+    ///
+    /// # Panics
+    ///
+    /// As [`Check::run_isolated`].
+    #[must_use]
+    pub fn run_on_isolated(
+        self,
+        data: Dataset,
+        test: &str,
+        limit: Duration,
+        f: impl Fn(&Point) -> Outcome,
+    ) -> FunctionResult {
+        if isolated::is_child_for(self) {
+            isolated::serve(&data, &f);
+        }
+        if isolated::in_child() {
+            return self.judge(data, Vec::new());
+        }
+        let outcomes = isolated::run(self, &data, test, limit);
         self.judge(data, outcomes)
     }
 
@@ -222,7 +285,7 @@ impl Check {
 }
 
 /// `f(point)`, with a panic turned into [`Outcome::Panic`].
-fn evaluate(f: &impl Fn(&Point) -> Outcome, point: &Point) -> Outcome {
+pub(crate) fn evaluate(f: &impl Fn(&Point) -> Outcome, point: &Point) -> Outcome {
     catch_unwind(AssertUnwindSafe(|| f(point)))
         .unwrap_or_else(|p| Outcome::Panic(panic_message(p.as_ref())))
 }
