@@ -486,7 +486,8 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 18: statrs gamma_lr and beta_reg** (follow-up; statrs
   `function::gamma::gamma_lr` on `gammainc` and `gammainc_large`,
-  `function::beta::beta_reg` on the three betainc datasets; PR open):
+  `function::beta::beta_reg` on the three betainc datasets;
+  [PR #31](https://github.com/traderhall757-arch/rust-sci-verify/pull/31), merged):
   - `gamma_lr` panics at x = 0 for every shape (12 grid points; `gamma_ur`
     too): **finding 032** (medium), approved by Claude after the checklist.
     Its other 15 failures are finding 012's (now naming it): up to 4.1e-6 at
@@ -495,20 +496,30 @@ _Updated at the end of every session. Start here._
     it), plus statrs's 140-step cap at a = b = 1e5; a bit-exact copy with
     the exact prefactor and no cap passes all 969.
 
+- **Milestone 4, part 19: puruspe ln_gamma and gammp for large shapes**
+  (follow-up; `puruspe::ln_gamma` on `gammaln`, `puruspe::gammp` on
+  `gammainc_large`; PR open):
+  - `ln_gamma` runs on the 877 `gammaln` points where Gamma(x) > 0 or x is
+    a pole (as for statrs) and fails 666: **finding 033** (high), approved
+    by Claude after the checklist. No reflection formula (NaN below -4.5,
+    up to 1.8e-4 off on (-4, -3) and (-2, -1)); +inf for x below 2^-54
+    (x - 1 rounds to -1); `ln_gamma(1)` = -5.2e-12, so all digits are lost
+    next to 1 and 2; and an absolute error up to 1.3e-10 everywhere (its
+    7-term Lanczos set), above the tolerance up to x = 156.
+  - `gammp` fails 25 of 51 `gammainc_large` points: finding 002, extended
+    and now root-caused. NaN at all 19 grid points with 0.2a <= x <= a - 1:
+    puruspe's log-sum-exp rewrite of Numerical Recipes' `gammpapprox` takes
+    the logarithm of the negative `xu - x` (the same cause as the original
+    NaN at a >= 100; `gammq` too). Up to 1.5e-6 near the mean (1.3e-5 off
+    the grid at a = 1e10): the a ln a cancellation in the scale and the
+    18-point quadrature, of equal size (shown with a copy of the function).
+
 ## Next
 
-1. **Owner: review and merge the open PR** (the last one of this session:
-   Milestone 4 part 18, statrs `gamma_lr` and `beta_reg`, finding 032).
+1. **Owner: review and merge the open PR** (Milestone 4 part 19, puruspe
+   `ln_gamma` and `gammp` for large shapes, finding 033 and the extension
+   of finding 002).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **puruspe `ln_gamma` and `gammp` follow-up** (started, not committed): a
-     first run on `gammaln` (877 points where Gamma > 0 or x is a pole, as
-     for statrs) failed 666: about 1e-10 relative error at ordinary positive
-     x (its 7-term Lanczos sum; the "prefactor floor" of finding 001), NaN
-     for negative x (no reflection), inf below about x = 1e-3, and losses
-     next to 1 and 2. `gammp` on `gammainc_large` returns NaN for every
-     a >= 1e8 below the mean (finding 002's NaN, extended) and errors up to
-     about 1e-7 near the mean. Needs the checklist and likely a new finding
-     for `ln_gamma`.
    - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and
      asymptotic), `ks_onesample` / two-sample (exact distributions),
      `fishers_exact` (hypergeometric sums), `anderson_darling` (its p-value
@@ -520,6 +531,9 @@ _Updated at the end of every session. Start here._
      `InverseGamma` (finding 025: density overflow, bracket from `cdf`);
      check it, then `Weibull`, `LogNormal`, `Pareto`, `Gumbel`, `Laplace`,
      `Cauchy`, `Levy` (closed forms: look for finding 023's `1 - exp(..)`).
+   - puruspe `gamma` (the Fukushima port) and `gammq` have no checks yet;
+     `gamma` can run on the `gamma` dataset, `gammq` on the `gamma_sf`
+     data (finding 002 already shows `gammq(100, 50)` = NaN).
    - Optional: the K result of `Inu_Knu` on the `kv` grid (finding 008's
      code path).
    - Keep expected lists small: vector inputs are listed value by value, so
@@ -533,7 +547,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 032 likewise.
+  007 to 033 likewise (and finding 002's extension, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
