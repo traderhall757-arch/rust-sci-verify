@@ -297,7 +297,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 11: statrs F distribution** (statrs
   `FisherSnedecor::cdf`, `sf`, `inverse_cdf`;
-  [PR #23](https://github.com/traderhall757-arch/rust-sci-verify/pull/23), open):
+  [PR #23](https://github.com/traderhall757-arch/rust-sci-verify/pull/23), merged):
   - New datasets `f_cdf` and `f_sf` (1999 points each: d1, d2 in {0.5, 1, 2,
     5, 10, 30, 100, 1000, 1e5}, every pair, x 21 values of x from 0 to 1e300
     plus 1 + k s around the bulk; tolerance 1e-12, betainc's; condition
@@ -326,22 +326,55 @@ _Updated at the end of every session. Start here._
     values capped near 2^52 d2 / d1, 0.32% off at the median for d1 = 1e5,
     d2 = 0.5).
 
+- **Milestone 4, part 12: statrs Exponential and Erlang distributions**
+  (statrs `Exp::cdf`, `sf`, `inverse_cdf`; `Erlang::cdf`, `sf`,
+  `inverse_cdf`;
+  [PR #25](https://github.com/traderhall757-arch/rust-sci-verify/pull/25), open):
+  - New datasets `expon_cdf` and `expon_sf` (325 points each: x = 10^-k for
+    k = 1..20, 0..40 step 0.25, the underflow edge 700..750, decades from
+    1e-300 to 1e300, negative x) and `expon_ppf` (138 points, the `norm_ppf`
+    probabilities; p = 1 tagged `pole`). Tolerance 1e-13 for all three: the
+    inputs are exact and expm1, exp and log1p of an exact argument are within
+    an ulp. Reference: `-expm1(-x)`, `exp(-x)`, `-log1p(-p)`, tested against
+    the gamma routes with shape 1, `mpmath.gammainc`, the Taylor series and
+    `-log(1 - p)` at 1200 bits. SciPy passes every point (worst 2.2e-16).
+  - `Exp::sf` is exact at every point; `Exp::inverse_cdf` passes (worst
+    2.1e-16).
+  - `Exp::cdf` fails 45 of 325: **finding 023** (high), approved by Claude
+    after the checklist. It computes `1 - exp(-x)`, so it returns 0 for every
+    x below 2^-54 = 5.6e-17 (1e-20 gives 0) and loses digits up to about
+    x = 5e-4 (8.3e-8 at 1e-10, 5.7e-13 at 1e-5). Off the grid 9,805 of 20,000
+    random x fail. Confirmed: `-expm1(-x)` passes every grid and random
+    point.
+  - `Erlang` calls `Gamma` for `cdf`, `sf` and `inverse_cdf`, so it is checked
+    on the gamma datasets' whole-number shapes (409, 409 and 324 points; the
+    report's grid line says so) and fails exactly where `Gamma` does:
+    findings 012 and 013 now name it. `GAMMA_PPF` in `expected.rs` is split
+    into `GAMMA_PPF_WHOLE` (111, shared with `Erlang`) and
+    `GAMMA_PPF_FRACTIONAL` (59); the `Gamma` check lists both, unchanged.
+  - Correction to the earlier plan: no statrs continuous distribution except
+    `Dirac` uses the generic bisection `inverse_cdf` default (every other one,
+    `Erlang` included, has its own), so there is nothing more to check there.
+
 ## Next
 
-1. **Owner: review and merge [PR #23](https://github.com/traderhall757-arch/rust-sci-verify/pull/23)** (statrs F distribution,
-   findings 021 and 022).
+1. **Owner: review and merge [PR #25](https://github.com/traderhall757-arch/rust-sci-verify/pull/25)** (statrs
+   Exponential and Erlang, finding 023).
 2. **Milestone 4, continued** (next session): more distributions and
-   crates, one family per PR. Suggested order: Exponential, Erlang,
-   InverseGamma through the gamma functions; the generic `inverse_cdf`
-   default that several distributions share is a bisection with a relative
-   1e-14 test and `sf` in the upper half, but also stops after 100 steps,
-   so check its deep tails early; then statrs hypothesis tests. Small
-   follow-ups: run `gammaln` and `gammainc_large` on statrs `ln_gamma` and
-   `gamma_lr` and puruspe `ln_gamma` and `gammp`; statrs also has `digamma`
-   (run it on the new `digamma` data; use `run_isolated` if it recurses);
-   statrs `beta_reg` itself on the three betainc datasets (same code as
-   `Beta::cdf`). Optional: check the K result of `Inu_Knu` on the `kv` grid
-   (same code path as finding 008).
+   crates, one family per PR. Suggested order: statrs `InverseGamma`
+   (`cdf` = `gamma_ur(a, rate / x)`, so it inherits finding 012 and adds a
+   rounded argument; its quantile is `internal::newton_raphson_quantile`,
+   shared only with `Chi` and not yet checked anywhere; needs its own
+   datasets), then `Chi`, `Weibull`, `LogNormal`, `Pareto`, `Gumbel`,
+   `Laplace`, `Cauchy`, `Levy`
+   (closed forms: look for the same `1 - exp(..)` cancellation as finding
+   023), then statrs hypothesis tests. Small follow-ups: run `gammaln` and
+   `gammainc_large` on statrs `ln_gamma` and `gamma_lr` and puruspe
+   `ln_gamma` and `gammp`; statrs also has `digamma` (run it on the new
+   `digamma` data; use `run_isolated` if it recurses); statrs `beta_reg`
+   itself on the three betainc datasets (same code as `Beta::cdf`).
+   Optional: check the K result of `Inu_Knu` on the `kv` grid (same code
+   path as finding 008).
 3. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
@@ -351,7 +384,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 022 likewise.
+  007 to 023 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -395,7 +428,7 @@ _Updated at the end of every session. Start here._
   `gammainc_large` about 1.5 minutes, `gammaln` and `gammasgn` about 2 s,
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
-  about 6 minutes;
+  about 6 minutes; the three `expon` datasets about 3 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
