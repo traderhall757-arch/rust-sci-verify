@@ -3,7 +3,9 @@ use std::time::Duration;
 use harness::{Check, Expected, Outcome, finish};
 
 use crate::expected;
-use statrs::distribution::{Beta, ChiSquared, ContinuousCDF, Gamma, Normal, StudentsT};
+use statrs::distribution::{
+    Beta, ChiSquared, ContinuousCDF, FisherSnedecor, Gamma, Normal, StudentsT,
+};
 use statrs::function::{erf, gamma};
 
 /// The standard normal distribution (the reference data has mean 0, sd 1).
@@ -41,6 +43,19 @@ fn chi_squared(a: f64) -> ChiSquared {
 /// reference data).
 fn beta_dist(a: f64, b: f64) -> Beta {
     Beta::new(a, b).expect("valid parameters")
+}
+
+/// The F distribution with `d1` and `d2` degrees of freedom.
+fn fisher_snedecor(d1: f64, d2: f64) -> FisherSnedecor {
+    FisherSnedecor::new(d1, d2).expect("valid parameters")
+}
+
+/// Evaluates `f` at the point's degrees of freedom and argument `x` (or `p`).
+fn f_dist(p: &harness::Point, arg: &str, f: impl Fn(&FisherSnedecor, f64) -> f64) -> Outcome {
+    Outcome::scalar(f(
+        &fisher_snedecor(p.scalar("d1"), p.scalar("d2")),
+        p.scalar(arg),
+    ))
 }
 
 #[test]
@@ -185,6 +200,24 @@ fn statrs_matches_reference() {
             }],
         }
         .run(|p| Outcome::scalar(beta_dist(p.scalar("a"), p.scalar("b")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::FisherSnedecor::cdf",
+            dataset: "f_cdf",
+            expected: &[Expected {
+                finding: "021-statrs-fisher-snedecor-cdf",
+                points: expected::F_CDF,
+            }],
+        }
+        .run(|p| f_dist(p, "x", FisherSnedecor::cdf)),
+        Check {
+            function: "statrs::distribution::FisherSnedecor::sf",
+            dataset: "f_sf",
+            expected: &[Expected {
+                finding: "021-statrs-fisher-snedecor-cdf",
+                points: expected::F_SF,
+            }],
+        }
+        .run(|p| f_dist(p, "x", FisherSnedecor::sf)),
         // Near the end: it loops forever at 7 points (finding 020); the
         // abandoned threads only share the CPU with `t_ppf`, whose correct
         // points need microseconds.
@@ -199,6 +232,17 @@ fn statrs_matches_reference() {
         .run_with_time_limit(TIME_LIMIT, |p| {
             Outcome::scalar(beta_dist(p.scalar("a"), p.scalar("b")).inverse_cdf(p.scalar("p")))
         }),
+        // It calls `inv_beta_reg` like `Beta::inverse_cdf`, so it can loop
+        // forever too.
+        Check {
+            function: "statrs::distribution::FisherSnedecor::inverse_cdf",
+            dataset: "f_ppf",
+            expected: &[Expected {
+                finding: "022-statrs-fisher-snedecor-inverse-cdf",
+                points: expected::F_PPF,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| f_dist(p, "p", FisherSnedecor::inverse_cdf)),
         // Last: it loops forever at some points (finding 011), and the
         // abandoned threads keep a CPU busy until the test ends.
         Check {

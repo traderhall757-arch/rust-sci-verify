@@ -38,7 +38,9 @@ and has the same counts for items 1 to 4 as
 [finding 015](015-special-inv-inc-beta.md), which has the detailed
 analysis; all 293 such points are also in that finding's list. Only the
 symptom of item 1 differs (special loops forever in a release build). `StudentsT::inverse_cdf` uses the same function
-([finding 011](011-statrs-students-t-inverse-cdf.md)).
+([finding 011](011-statrs-students-t-inverse-cdf.md)), and so does
+`FisherSnedecor::inverse_cdf`, which adds its own loss in the upper tail
+([finding 022](022-statrs-fisher-snedecor-inverse-cdf.md)).
 
 ## Reproduction
 

@@ -1098,11 +1098,14 @@ def test_f_ppf_matches_closed_forms(p):
         (0.5, 1e5, 1 - 1e-15),
         (1e5, 1e5, 0.999),
         (5.0, 0.5, 1e-300),
+        (1000.0, 0.5, 1e-100),
+        (0.5, 1e5, 1e-100),
     ],
 )
 def test_f_ppf_inverts_the_cdf(d1, d2, p):
     # F(ppf(p)) = p, through the independently tested cdf and sf, at points
-    # where SciPy fails (rows 1 to 3) or statrs fails worst.
+    # where SciPy fails (rows 1 to 3 and the last, whose quantile is far below
+    # the smallest double) or statrs fails worst.
     with mpmath.workdps(50):
         d1, d2, p = mp(d1, d2, p)
         x = functions._mp_f_ppf(d1, d2, p)
