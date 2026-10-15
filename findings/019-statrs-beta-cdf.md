@@ -29,6 +29,20 @@
      `cdf(0.9998951379361433)` at a = 1e4, b = 0.1 and 5.0e-10 for its
      mirror image, `sf(0.00010486206385669913)` at a = 0.1, b = 1e4.
 
+  `Beta::cdf` is `statrs::function::beta::beta_reg`, which is also public;
+  called directly on the three betainc datasets (added 2026-10-15; tolerance
+  1e-12, lists `BETA_REG`, `BETA_REG_LARGE`, `BETA_REG_SWITCH`) it fails 35
+  of 639 points of `betainc.jsonl` (worst 5.7e-11), 98 of 144 of
+  `betainc_large.jsonl` (a, b from 3001 to 1e5; worst 6.1e-7) and 62 of 186
+  of `betainc_switch.jsonl` (worst 1.4e-8). A copy of `beta_reg` that is bit
+  for bit equal to statrs on all 969 points shows the causes: with the
+  correctly rounded prefactor (from mpmath) in place of the one formed from
+  separately rounded logarithms, all but 1 point pass (cause 2); the last
+  one, a = b = 1e5 at x = 0.5 (6.1e-7), also needs more than the 140
+  continued-fraction steps statrs allows (the cap noted in finding 021).
+  With both changes all 969 pass (worst 2.6e-13). The cut-off of cause 1
+  does not occur on these grids.
+
 statrs's `StudentsT` uses the same `beta_reg` and shares both causes
 ([finding 010](010-statrs-students-t.md), causes 2 and 3), and so does
 `FisherSnedecor`, which adds a rounded argument and, for shapes near 5e4,

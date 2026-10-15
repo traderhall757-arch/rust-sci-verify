@@ -469,7 +469,8 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 17: statrs ln_gamma and digamma** (follow-up; statrs
   `function::gamma::ln_gamma`, `digamma`, on the existing `gammaln` and
-  `digamma` data; PR open):
+  `digamma` data;
+  [PR #30](https://github.com/traderhall757-arch/rust-sci-verify/pull/30), merged):
   - `ln_gamma` is documented as the logarithm of Gamma, so it runs on the
     877 `gammaln` points where Gamma(x) > 0 or x is a pole (its NaN where
     Gamma < 0 is its documented answer). It fails 32: **finding 030**
@@ -483,25 +484,46 @@ _Updated at the end of every session. Start here._
     confirmed with an exactly reduced argument). No stack overflow, unlike
     special's (finding 017).
 
+- **Milestone 4, part 18: statrs gamma_lr and beta_reg** (follow-up; statrs
+  `function::gamma::gamma_lr` on `gammainc` and `gammainc_large`,
+  `function::beta::beta_reg` on the three betainc datasets; PR open):
+  - `gamma_lr` panics at x = 0 for every shape (12 grid points; `gamma_ur`
+    too): **finding 032** (medium), approved by Claude after the checklist.
+    Its other 15 failures are finding 012's (now naming it): up to 4.1e-6 at
+    a = 1e9, the spacing of doubles near a ln a, and one flushed subnormal.
+  - `beta_reg` fails 195 of 969 points: finding 019's prefactor (now naming
+    it), plus statrs's 140-step cap at a = b = 1e5; a bit-exact copy with
+    the exact prefactor and no cap passes all 969.
+
 ## Next
 
-1. **Owner: review and merge [PR #25](https://github.com/traderhall757-arch/rust-sci-verify/pull/25)** (statrs
-   Exponential and Erlang, finding 023).
-2. **Milestone 4, continued** (next session): more distributions and
-   crates, one family per PR. Suggested order: statrs `InverseGamma`
-   (`cdf` = `gamma_ur(a, rate / x)`, so it inherits finding 012 and adds a
-   rounded argument; its quantile is `internal::newton_raphson_quantile`,
-   shared only with `Chi` and not yet checked anywhere; needs its own
-   datasets), then `Chi`, `Weibull`, `LogNormal`, `Pareto`, `Gumbel`,
-   `Laplace`, `Cauchy`, `Levy`
-   (closed forms: look for the same `1 - exp(..)` cancellation as finding
-   023), then statrs hypothesis tests. Small follow-ups: run `gammaln` and
-   `gammainc_large` on statrs `ln_gamma` and `gamma_lr` and puruspe
-   `ln_gamma` and `gammp`; statrs also has `digamma` (run it on the new
-   `digamma` data; use `run_isolated` if it recurses); statrs `beta_reg`
-   itself on the three betainc datasets (same code as `Beta::cdf`).
-   Optional: check the K result of `Inu_Knu` on the `kv` grid (same code
-   path as finding 008).
+1. **Owner: review and merge the open PR** (the last one of this session:
+   Milestone 4 part 18, statrs `gamma_lr` and `beta_reg`, finding 032).
+2. **Milestone 4, continued** (next session; one family per PR):
+   - **puruspe `ln_gamma` and `gammp` follow-up** (started, not committed): a
+     first run on `gammaln` (877 points where Gamma > 0 or x is a pole, as
+     for statrs) failed 666: about 1e-10 relative error at ordinary positive
+     x (its 7-term Lanczos sum; the "prefactor floor" of finding 001), NaN
+     for negative x (no reflection), inf below about x = 1e-3, and losses
+     next to 1 and 2. `gammp` on `gammainc_large` returns NaN for every
+     a >= 1e8 below the mean (finding 002's NaN, extended) and errors up to
+     about 1e-7 near the mean. Needs the checklist and likely a new finding
+     for `ln_gamma`.
+   - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and
+     asymptotic), `ks_onesample` / two-sample (exact distributions),
+     `fishers_exact` (hypergeometric sums), `anderson_darling` (its p-value
+     is an empirical approximation by design: check the statistic, and the
+     p-value only against the same published formula). Each needs its exact
+     distribution in mpmath. Expect the `1 - cdf` pattern of findings
+     026 to 029.
+   - **`Chi::inverse_cdf`**: it uses `newton_raphson_quantile` like
+     `InverseGamma` (finding 025: density overflow, bracket from `cdf`);
+     check it, then `Weibull`, `LogNormal`, `Pareto`, `Gumbel`, `Laplace`,
+     `Cauchy`, `Levy` (closed forms: look for finding 023's `1 - exp(..)`).
+   - Optional: the K result of `Inu_Knu` on the `kv` grid (finding 008's
+     code path).
+   - Keep expected lists small: vector inputs are listed value by value, so
+     samples stay at n <= 100 (see PR #29).
 3. Nothing is submitted upstream until the whole project is done and tested
    (owner, 2026-10-14). The puruspe fork (`traderhall757-arch/puruspe`,
    branch `fix-betai`) still holds the old commit; replace it with the
@@ -511,7 +533,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 023 likewise.
+  007 to 032 likewise.
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -566,5 +588,13 @@ _Updated at the end of every session. Start here._
   rule 6); the method and seed are recorded in finding 001.
 - Upstream puruspe `main` fails its own `cargo fmt --check` and `cargo clippy`
   on Rust 1.97, independently of our patch (`fixes/README.md`).
+- The reference generator pins NumPy below AVX-512 and OpenBLAS to its
+  Haswell kernels (`rsv_reference/__init__.py`), so SciPy columns do not
+  depend on the CPU; it refuses to run otherwise. Run the whole reference
+  `pytest` (not one file): a single test file that imports NumPy first
+  defeats the pins (`test_generate.py` alone fails its two pin tests).
+- Hypothesis-test tolerances follow one rule: the largest bound
+  max(kappa_p, 1) (kappa + n) 2^-53 a careful method can reach on the grid,
+  rounded up (tested per dataset).
 - The weekly job has been dry-run locally; its first real run is the first
   Monday after merge, or run it by hand from the Actions tab.
