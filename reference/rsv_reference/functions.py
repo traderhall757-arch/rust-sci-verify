@@ -1920,6 +1920,148 @@ F_ONEWAY = Spec(
     scipy_fn=_sc_f_oneway,
 )
 
+# --- hypothesis tests: D'Agostino's skewness test ----------------------------
+
+# Samples x_i = loc + u_i + s u_i^2 (+ an outlier) with u_i the t-test pattern
+# ((7919 i) mod 1000 - 500) / 1000: s skews them; an outlier of 50 at the first
+# value skews them strongly. Plus exactly symmetric samples, whose sample
+# skewness is 0.
+_SKEW_N = (8, 10, 20, 50, 100)
+_SKEW_S = (-3.0, -0.3, 0.01, 0.3, 3.0)
+
+
+def _skewtest_samples() -> list[tuple[float, ...]]:
+    samples = []
+    for n in _SKEW_N:
+        u = [((7919 * i) % 1000 - 500) / 1000 for i in range(n)]
+        for loc in (0.0, 10.0):
+            samples.extend(tuple(loc + v + s * v * v for v in u) for s in _SKEW_S)
+            samples.append(tuple(loc + v + (50.0 if i == 0 else 0.0) for i, v in enumerate(u)))
+            # Symmetric: the values 1..n shifted to loc (their mean, minus (n + 1) / 2).
+            samples.append(tuple(loc + i - (n + 1) / 2 for i in range(1, n + 1)))
+    return samples
+
+
+def _skewtest_grid() -> list[tuple[tuple[float, ...], float]]:
+    return [(x, alt) for x in _skewtest_samples() for alt in _TTEST_ALTERNATIVES]
+
+
+def _mp_skew_root_b1(x: list[mpmath.mpf]) -> mpmath.mpf:
+    """The sample skewness m3 / m2^(3/2) with the biased (1/n) central moments."""
+    n = len(x)
+    mean = mpmath.fsum(x) / n
+    m2 = mpmath.fsum((v - mean) ** 2 for v in x) / n
+    m3 = mpmath.fsum((v - mean) ** 3 for v in x) / n
+    return m3 / m2 ** mpmath.mpf(1.5)
+
+
+def _mp_skewtest_z(x: list[mpmath.mpf]) -> mpmath.mpf:
+    """D'Agostino's transform of the sample skewness to a standard normal z
+    (D'Agostino, Belanger and D'Agostino 1990, eqs. 4-9), as in SciPy:
+    y = b1 sqrt((n + 1)(n + 3) / (6 (n - 2))), W^2 = -1 + sqrt(2 (beta2 - 1)),
+    delta = 1 / sqrt(log W), alpha = sqrt(2 / (W^2 - 1)), z = delta asinh(y / alpha).
+    z = 0 for a sample with zero skewness."""
+    n = mpmath.mpf(len(x))
+    with mpmath.extraprec(60):
+        y = _mp_skew_root_b1(x) * mpmath.sqrt((n + 1) * (n + 3) / (6 * (n - 2)))
+        beta2 = (
+            3 * (n**2 + 27 * n - 70) * (n + 1) * (n + 3) / ((n - 2) * (n + 5) * (n + 7) * (n + 9))
+        )
+        w2 = -1 + mpmath.sqrt(2 * (beta2 - 1))
+        delta = 1 / mpmath.sqrt(mpmath.log(w2) / 2)
+        alpha = mpmath.sqrt(2 / (w2 - 1))
+        return delta * mpmath.asinh(y / alpha)
+
+
+def _mp_norm_tail(z: mpmath.mpf, alternative: float) -> mpmath.mpf:
+    """The p-value of a standard normal z: 2 Q(|z|), Q(z) or Phi(z)."""
+    if alternative == 0:
+        return mpmath.erfc(abs(z) / mpmath.sqrt(2))
+    if alternative > 0:
+        return mpmath.erfc(z / mpmath.sqrt(2)) / 2
+    return mpmath.erfc(-z / mpmath.sqrt(2)) / 2
+
+
+def _mp_skewtest(x: list[mpmath.mpf], alternative: mpmath.mpf):
+    z = _mp_skewtest_z(x)
+    return z, _mp_norm_tail(z, alternative)
+
+
+def skewtest_rounding_bound(x: tuple[float, ...], alternative: float) -> float:
+    """max(kappa_p, 1) (kappa_z + n) 2^-53: what a careful method may lose.
+
+    kappa_z = kappa_b1 times the asinh step's |u / (sqrt(1 + u^2) asinh u)| <= 1
+    (u = y / alpha), with kappa_b1 = sum |x_i d b1 / d x_i| / |b1| from
+    d m2 / d x_i = 2 d_i / n and d m3 / d x_i = 3 (d_i^2 - m2) / n (d = x - mean);
+    kappa_p = |z phi(z) / P|."""
+    xs = [mpmath.mpf(v) for v in x]
+    n = len(xs)
+    mean = mpmath.fsum(xs) / n
+    d = [v - mean for v in xs]
+    m2 = mpmath.fsum(v**2 for v in d) / n
+    m3 = mpmath.fsum(v**3 for v in d) / n
+    if m3 == 0:
+        return 0.0  # the symmetric samples: exact in double arithmetic (see the tolerance reason)
+    b1 = m3 / m2 ** mpmath.mpf(1.5)
+    grads = [(3 * (di**2 - m2) / n) / m2**1.5 - 1.5 * m3 / m2**2.5 * (2 * di / n) for di in d]
+    kappa_b1 = mpmath.fsum(abs(v * g) for v, g in zip(xs, grads, strict=True)) / abs(b1)
+    z = _mp_skewtest_z(xs)
+    nn = mpmath.mpf(n)
+    y = b1 * mpmath.sqrt((nn + 1) * (nn + 3) / (6 * (nn - 2)))
+    beta2 = (
+        3
+        * (nn**2 + 27 * nn - 70)
+        * (nn + 1)
+        * (nn + 3)
+        / ((nn - 2) * (nn + 5) * (nn + 7) * (nn + 9))
+    )
+    w2 = -1 + mpmath.sqrt(2 * (beta2 - 1))
+    u = y / mpmath.sqrt(2 / (w2 - 1))
+    kappa_z = kappa_b1 * abs(u / (mpmath.sqrt(1 + u * u) * mpmath.asinh(u)))
+    pdf = mpmath.npdf(z)
+    kappa_p = abs(z * pdf / _mp_norm_tail(z, alternative)) * (1 if alternative != 0 else 2)
+    return float(max(kappa_p, 1) * (kappa_z + n) * mpmath.mpf(2) ** -53)
+
+
+def _sc_skewtest(x: list[float], alternative: float) -> tuple[float, float]:
+    r = st.skewtest(x, alternative=_TTEST_ALTERNATIVES[alternative])
+    return float(r.statistic), float(r.pvalue)
+
+
+SKEWTEST = Spec(
+    name="skewtest",
+    description=(
+        "D'Agostino's skewness test: z from the sample skewness and its p-value from the "
+        "standard normal; alternative -1 less, 0 two-sided, 1 greater"
+    ),
+    inputs=("x", "alternative"),
+    outputs=("statistic", "pvalue"),
+    tolerance=2e-12,
+    tolerance_reason=(
+        "For both outputs, by the rule of ttest_1samp. The skewness b1 = m3 / m2^(3/2) is "
+        "formed from sums of n rounded terms, so a careful method is off by up to about "
+        "(kappa_z + n) 2^-53, kappa_z being z's relative condition number in the data "
+        "(skewtest_rounding_bound); the p-value adds kappa_p = |z phi(z) / P|. The largest "
+        "bound max(kappa_p, 1) (kappa_z + n) 2^-53 on this grid is 1.6e-12 (n = 100 with an "
+        "outlier, z = 12.1); 2e-12 is the smallest round value above it (tested). For the "
+        "exactly symmetric samples every operation in the moments is exact in double "
+        "arithmetic, so a careful method returns z = 0 exactly (tested). SciPy's worst error "
+        "is 1.5e-12 except at those symmetric samples, where it returns z = 1.01 to 1.04 "
+        "instead of 0"
+    ),
+    grid_description=(
+        "samples of n in {8, 10, 20, 50, 100} values: loc + u_i + s u_i^2 with "
+        "u_i = ((7919 i) mod 1000 - 500) / 1000, loc in {0, 10} and s in {-3, -0.3, 0.01, 0.3, "
+        "3}; loc + u_i plus 50 at i = 0 (an outlier); and the exactly symmetric loc + i - "
+        "(n + 1) / 2, i = 1..n; each with alternative -1 (less), 0 (two-sided) and 1 "
+        "(greater). |z| from 0 to 12.1, p-value from 4.3e-34 to 1"
+    ),
+    grid=_skewtest_grid,
+    mpmath_fn=_mp_skewtest,
+    scipy_name="scipy.stats.skewtest",
+    scipy_fn=_sc_skewtest,
+)
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -2589,6 +2731,7 @@ ALL: tuple[Spec, ...] = (
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
     INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
+    SKEWTEST,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip

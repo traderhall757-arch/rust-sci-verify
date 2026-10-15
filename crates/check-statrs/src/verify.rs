@@ -10,6 +10,7 @@ use statrs::distribution::{
 use statrs::function::{erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
 use statrs::stats_tests::f_oneway::f_oneway;
+use statrs::stats_tests::skewtest::skewtest;
 use statrs::stats_tests::ttest_onesample::ttest_onesample;
 use statrs::stats_tests::{Alternative, NaNPolicy};
 
@@ -499,6 +500,27 @@ fn statrs_matches_reference() {
             }],
         }
         .run(|p| statistic_and_pvalue(f_oneway(groups(p), NaNPolicy::Error))),
+        Check {
+            function: "statrs::stats_tests::skewtest::skewtest",
+            dataset: "skewtest",
+            expected: &[
+                Expected {
+                    finding: "029-statrs-skewtest",
+                    points: expected::SKEWTEST,
+                },
+                Expected {
+                    finding: "009-statrs-normal",
+                    points: expected::SKEWTEST_ERFC,
+                },
+            ],
+        }
+        .run(|p| {
+            statistic_and_pvalue(skewtest(
+                p.inputs["x"].clone(),
+                alternative(p.scalar("alternative")),
+                NaNPolicy::Error,
+            ))
+        }),
         // Near the end: it loops forever at 7 points (finding 020); the
         // abandoned threads only share the CPU with `t_ppf`, whose correct
         // points need microseconds.

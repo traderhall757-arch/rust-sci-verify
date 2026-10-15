@@ -17,6 +17,11 @@
   the subnormal and zero results beyond x = -37.5, where the error metric is
   relative to 2.2e-308. The quantile `inverse_cdf` is **not** affected: it
   passes all 138 points of `norm_ppf` (worst 2.6e-16).
+  `statrs::stats_tests::skewtest::skewtest` takes its p-values from
+  `Normal::cdf`, so it inherits this error: 100 of 210 points of
+  `reference/data/skewtest.jsonl` (tolerance 2e-12) fail only through it
+  (p-values 2.4e-11 to 1.03e-10 off; list `SKEWTEST_ERFC`; added
+  2026-10-15). Its own errors are finding 029.
 
 ## Reproduction
 

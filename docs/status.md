@@ -427,7 +427,8 @@ _Updated at the end of every session. Start here._
     leave 0 of 2,589 random samples failing.
 
 - **Milestone 4, part 15: statrs chi-squared test and one-way ANOVA** (statrs
-  `stats_tests::chisquare`, `stats_tests::f_oneway`; PR open):
+  `stats_tests::chisquare`, `stats_tests::f_oneway`;
+  [PR #28](https://github.com/traderhall757-arch/rust-sci-verify/pull/28), merged):
   - New datasets `chisquare` (175 points: 2 to 30 categories, equal or
     sloping expected frequencies, totals 100 to 1e6, ddof 0 and 1) and
     `f_oneway` (48 points: 2 to 5 groups of 2 to 30 values around 0 and 100,
@@ -449,6 +450,21 @@ _Updated at the end of every session. Start here._
     generator now pins `OPENBLAS_CORETYPE=Haswell` before NumPy and SciPy are
     imported and refuses to run otherwise; regenerating every dataset changes
     only 15 SciPy values of `f_oneway`.
+
+- **Milestone 4, part 16: statrs skewness test** (statrs
+  `stats_tests::skewtest`; PR open):
+  - New dataset `skewtest` (210 points: samples of 8 to 100 values with
+    quadratic skew, an outlier, or exact symmetry, around 0 and 10; three
+    alternatives; outputs z and p-value; tolerance 2e-12 from the rounding
+    bound, largest 1.6e-12, tested). Reference: D'Agostino's transform from
+    the exact sample skewness; tested against exact rational arithmetic and
+    the published SciPy example.
+  - `skewtest` fails 149 points. **Finding 029** (high), approved by Claude
+    after the checklist, covers 49: it replaces a skewness of exactly 0 by
+    1 (as SciPy does), so symmetric data such as 1..8 get z = 1.01 and a
+    two-sided p of 0.31 instead of 1; `1 - cdf` p-values; plain summation.
+    The other 100 fail only through `Normal::cdf`'s `erfc` (finding 009,
+    now naming `skewtest`).
 
 ## Next
 
