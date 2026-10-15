@@ -452,7 +452,8 @@ _Updated at the end of every session. Start here._
     only 15 SciPy values of `f_oneway`.
 
 - **Milestone 4, part 16: statrs skewness test** (statrs
-  `stats_tests::skewtest`; PR open):
+  `stats_tests::skewtest`;
+  [PR #29](https://github.com/traderhall757-arch/rust-sci-verify/pull/29), merged):
   - New dataset `skewtest` (210 points: samples of 8 to 100 values with
     quadratic skew, an outlier, or exact symmetry, around 0 and 10; three
     alternatives; outputs z and p-value; tolerance 2e-12 from the rounding
@@ -465,6 +466,22 @@ _Updated at the end of every session. Start here._
     two-sided p of 0.31 instead of 1; `1 - cdf` p-values; plain summation.
     The other 100 fail only through `Normal::cdf`'s `erfc` (finding 009,
     now naming `skewtest`).
+
+- **Milestone 4, part 17: statrs ln_gamma and digamma** (follow-up; statrs
+  `function::gamma::ln_gamma`, `digamma`, on the existing `gammaln` and
+  `digamma` data; PR open):
+  - `ln_gamma` is documented as the logarithm of Gamma, so it runs on the
+    877 `gammaln` points where Gamma(x) > 0 or x is a pole (its NaN where
+    Gamma < 0 is its documented answer). It fails 32: **finding 030**
+    (high), approved by Claude after the checklist. Finite values at 19
+    negative-integer poles (`ln_gamma(-2)` = 36.4), and all digits lost next
+    to 1 and 2 (`ln_gamma(1)` = -4.4e-16, `ln_gamma(1 - 1e-15)` = 0): a sum of
+    rounded logarithms that cancel, and a sine of a rounded pi x.
+  - `digamma` fails 9 of 949: **finding 031** (high), approved by Claude after
+    the checklist. Next to its zero (14x off at the nearest double) and at
+    large negative x (1.5% off at -1e15 - 0.5, from tan of a rounded pi x;
+    confirmed with an exactly reduced argument). No stack overflow, unlike
+    special's (finding 017).
 
 ## Next
 
