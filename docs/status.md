@@ -326,6 +326,19 @@ _Updated at the end of every session. Start here._
     values capped near 2^52 d2 / d1, 0.32% off at the median for d1 = 1e5,
     d2 = 0.5).
 
+- **Faster `reference-fresh`** ([PR #24](https://github.com/traderhall757-arch/rust-sci-verify/pull/24), merged):
+  - `python -m rsv_reference` runs each dataset in its own fresh process, in
+    parallel (driver in `rsv_reference/cli.py`): a full run takes 4 m 42 s
+    locally instead of 14 m 46 s, with byte-identical data.
+  - On pull requests, `scripts/select_datasets.py` regenerates only the
+    datasets whose `Spec` reaches changed definitions in `functions.py`
+    (syntax trees), whose data file changed, or that are new. It regenerates
+    everything when the generator, environment, workflow or shared code
+    changed, or when it cannot follow the code. It prints one line per
+    dataset (demo: one Spec changed, 3 s). Guardrail 10 in `docs/guardrails.md`.
+  - `main` (runs no longer cancelled) and a new weekly `reference-fresh` job
+    (opens a `reference-stale` issue) still regenerate everything; the check
+    also fails on untracked data files now.
 - **Milestone 4, part 12: statrs Exponential and Erlang distributions**
   (statrs `Exp::cdf`, `sf`, `inverse_cdf`; `Erlang::cdf`, `sf`,
   `inverse_cdf`;
@@ -355,6 +368,11 @@ _Updated at the end of every session. Start here._
   - Correction to the earlier plan: no statrs continuous distribution except
     `Dirac` uses the generic bisection `inverse_cdf` default (every other one,
     `Erlang` included, has its own), so there is nothing more to check there.
+  - Reference generator fix found by this PR's CI: NumPy's AVX-512 `exp`
+    differs from the C library's in the last bit, so `expon_sf`'s SciPy column
+    depended on the CPU (9 points). `rsv_reference` now disables NumPy's
+    `X86_V4` targets before NumPy is imported and refuses to run otherwise;
+    regenerating every dataset changes only those 9 values.
 
 ## Next
 

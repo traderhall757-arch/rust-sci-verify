@@ -2,7 +2,8 @@
 
 One file per mathematical function: `reference/data/<function>.jsonl`, written by
 `python -m rsv_reference` and read by `crates/harness`. Files are committed so
-`cargo test` needs no Python. CI regenerates them and fails if they differ.
+`cargo test` needs no Python. CI regenerates them and fails if they differ
+(on pull requests only the datasets they can have changed; see `docs/guardrails.md`).
 
 ## Layout: JSON Lines
 

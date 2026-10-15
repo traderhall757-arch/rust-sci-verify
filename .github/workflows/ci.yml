@@ -10,7 +10,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Every commit on main finishes its run: reference-fresh regenerates all
+  # data there, and pull requests rely on that (scripts/select_datasets.py).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,12 +42,17 @@ jobs:
         run: git diff --exit-code --stat -- reports/
 
   reference-fresh:
+    # Pull requests regenerate the datasets whose inputs they can have changed
+    # (scripts/select_datasets.py, which explains why the rest are safe to
+    # skip); pushes to main and the weekly workflow regenerate everything.
     runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: reference
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # a pull request's merge commit and its base, HEAD^1
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.11.32"
@@ -53,9 +60,35 @@ jobs:
       - run: uv run -q ruff check . ../scripts
       - run: uv run -q ruff format --check . ../scripts
       - run: uv run -q pytest -q
-      - run: uv run -q python -m rsv_reference
+      - name: Regenerate the reference data
+        run: |
+          set -o pipefail # the default shell is bash -e only; tee must not hide a failure
+          start=$SECONDS
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            registry=$(uv run -q python -c 'from rsv_reference.functions import ALL; print(" ".join(s.name for s in ALL))')
+            sel=$(python3 ../scripts/select_datasets.py --base HEAD^1 --registry "$registry" 2> selection.txt) \
+              || { cat selection.txt; exit 1; }
+          else
+            echo "regenerate all: ${{ github.event_name }} to ${{ github.ref_name }}" > selection.txt
+            sel=all
+          fi
+          cat selection.txt
+          case "$sel" in
+            all) uv run -q python -m rsv_reference | tee generated.txt ;;
+            none) echo "No dataset can have changed; none regenerated." | tee generated.txt ;;
+            *) uv run -q python -m rsv_reference $sel | tee generated.txt ;;
+          esac
+          {
+            echo '## Reference data'
+            echo "Regenerated in $((SECONDS - start)) s."
+            echo '```'; cat selection.txt generated.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm selection.txt generated.txt
       - name: Committed data matches a fresh regeneration
-        run: git diff --exit-code --stat -- data/
+        run: |
+          git diff --exit-code --stat -- data/
+          untracked=$(git status --porcelain --untracked-files=all -- data/)
+          if [ -n "$untracked" ]; then echo "Not committed: $untracked"; exit 1; fi
 
   coverage:
     runs-on: ubuntu-24.04
