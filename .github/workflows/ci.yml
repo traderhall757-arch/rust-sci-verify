@@ -62,6 +62,7 @@ jobs:
       - run: uv run -q pytest -q
       - name: Regenerate the reference data
         run: |
+          set -o pipefail # the default shell is bash -e only; tee must not hide a failure
           start=$SECONDS
           if [ "${{ github.event_name }}" = pull_request ]; then
             registry=$(uv run -q python -c 'from rsv_reference.functions import ALL; print(" ".join(s.name for s in ALL))')
