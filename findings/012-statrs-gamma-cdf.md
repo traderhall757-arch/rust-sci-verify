@@ -3,7 +3,8 @@
 - **Crate / version:** statrs 0.19.1 (`statrs::distribution::Gamma` and
   `statrs::distribution::ChiSquared`, methods `cdf` and `sf` of
   `ContinuousCDF`; both call `statrs::function::gamma::gamma_lr` /
-  `gamma_ur`; `statrs::distribution::Erlang` calls `Gamma`'s)
+  `gamma_ur`; `statrs::distribution::Erlang` calls `Gamma`'s, and
+  `statrs::distribution::InverseGamma` calls them at 1/x)
 - **Severity:** low (an accuracy loss: up to 1.2e-9 on the grid and
   3.4e-9 off it, about 9 correct digits), plus subnormal results
   flushed to 0
@@ -19,7 +20,15 @@
   (whole-number shape) calls `Gamma`'s `cdf` and `sf` directly; every point
   of both lists has a whole-number shape, so `Erlang` fails at all of them
   (checked on the 409 whole-number-shape points of each dataset, added
-  2026-10-15). Two groups,
+  2026-10-15). `InverseGamma::cdf` is `gamma_ur(a, 1/x)` and `sf` is
+  `gamma_lr(a, 1/x)`, so it fails at 8 of 531 points of
+  `reference/data/invgamma_cdf.jsonl` and 10 of 531 of
+  `reference/data/invgamma_sf.jsonl` for the same two causes (lists
+  `INVGAMMA_CDF` and `INVGAMMA_SF`; added 2026-10-15): 16 points with
+  a >= 1000, worst 2.5e-11, and the subnormal results at a = 5, x = 1/750
+  (`cdf`, true 2.5e-316) and a = 50, x = 1/1e-5 (`sf`, true 3.3e-315). Rounding
+  1/x costs at most 3.4e-13 on that grid (its tolerance reason). Its
+  panics for tiny x are finding 024. Two groups,
   by cause (section "Root cause"):
   1. **Large shape** (41 points, all with a >= 1000): the error grows like
      the shape, worst per shape 1.4e-12 (a = 1000), 2.4e-11 (1e4), 4.3e-10

@@ -342,7 +342,7 @@ _Updated at the end of every session. Start here._
 - **Milestone 4, part 12: statrs Exponential and Erlang distributions**
   (statrs `Exp::cdf`, `sf`, `inverse_cdf`; `Erlang::cdf`, `sf`,
   `inverse_cdf`;
-  [PR #25](https://github.com/traderhall757-arch/rust-sci-verify/pull/25), open):
+  [PR #25](https://github.com/traderhall757-arch/rust-sci-verify/pull/25), merged):
   - New datasets `expon_cdf` and `expon_sf` (325 points each: x = 10^-k for
     k = 1..20, 0..40 step 0.25, the underflow edge 700..750, decades from
     1e-300 to 1e300, negative x) and `expon_ppf` (138 points, the `norm_ppf`
@@ -373,6 +373,37 @@ _Updated at the end of every session. Start here._
     depended on the CPU (9 points). `rsv_reference` now disables NumPy's
     `X86_V4` targets before NumPy is imported and refuses to run otherwise;
     regenerating every dataset changes only those 9 values.
+
+- **Milestone 4, part 13: statrs InverseGamma distribution** (statrs
+  `InverseGamma::cdf`, `sf`, `inverse_cdf`; PR open):
+  - New datasets `invgamma_cdf` and `invgamma_sf` (531 points each: 15 shapes
+    0.01 to 1e4 x x = 1/t for the gamma_cdf grid's t, plus 0, 5e-324 and
+    1e-310; tolerance 1e-12, gamma's, since F(x) = Q(a, 1/x)) and
+    `invgamma_ppf` (405 points: the gamma_ppf probabilities; p = 1 tagged
+    `pole`, 3 `overflow`; 2e-13 from the largest |log x| 691.3, tested).
+    Shapes stop at 1e4 so that rounding 1/x (which SciPy, Boost and statrs
+    all do) costs at most 3.4e-13 (tested). a = 150 was added to the grid
+    after the off-grid scan found the quantile's overflow window. The
+    reference reuses the gamma routes at 1/x (60 extra bits); the gamma
+    quantile was factored into `_mp_gamma_quantile` (either tail), with
+    `gamma_ppf` byte-identical. Tested against `mpmath.gammainc` at 1/x and
+    closed forms for a = 1 and 1/2. SciPy fails 1 cdf, 1 sf (flushed
+    subnormals) and 11 ppf points (p = 5e-324).
+  - `cdf` and `sf` **panic** for every x below 5.56e-309 (30 points each):
+    **finding 024** (medium), approved by Claude after the checklist.
+    `rate / x` overflows to inf and `gamma_ur` / `gamma_lr` unwrap an
+    `XInvalid` error. Their other 8 and 10 failures (a >= 1000, worst
+    2.5e-11, and two flushed subnormals) are finding 012's, now naming
+    `InverseGamma`.
+  - `inverse_cdf` fails 38 of 405: **finding 025** (high), approved by Claude
+    after the checklist. For shapes from about 108 to 170 the density
+    `x^(-a-1) e^(-1/x) / Gamma(a)` overflows to inf, the Newton step becomes
+    zero and the search returns its first guess (median of
+    `InverseGamma(150, 1)` 12% off; up to 46% off the grid); in the upper tail
+    for small shapes the bracket comes from the rounded `cdf` and misses the
+    root (up to 77% off the grid); and at subnormal p (up to 3.8%). Causes 1
+    and 2 confirmed with a bit-exact copy of `newton_raphson_quantile`.
+    `Chi::inverse_cdf` uses the same search.
 
 ## Next
 
