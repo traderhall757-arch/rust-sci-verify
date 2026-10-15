@@ -779,6 +779,78 @@ def test_gamma_ppf_log_magnitude_matches_the_tolerance_reason():
     assert functions.GAMMA_PPF.tolerance >= 2 * worst * 2.0**-53
 
 
+@pytest.mark.parametrize("x", [5e-324, 1e-300, 1e-16, 1e-5, 0.5, 1.0, 37.5, 708.5, 745.0])
+def test_expon_cdf_and_sf_match_the_gamma_routes_and_the_series(x):
+    # The exponential distribution is the gamma distribution with shape 1:
+    # F = P(1, x) (the gamma_cdf series / continued fraction, and
+    # mpmath.gammainc), Q = Q(1, x). For small x also the series
+    # x - x^2/2 + x^3/6 - ..., summed directly.
+    with mpmath.workdps(50):
+        (x,) = mp(x)
+        one = mpmath.mpf(1)
+        assert close(functions._mp_expon_cdf(x), functions._mp_gamma_cdf(one, x))
+        assert close(functions._mp_expon_sf(x), functions._mp_gamma_sf(one, x))
+        route = mpmath.gammainc(one, 0, x, regularized=True)
+        assert close(functions._mp_expon_cdf(x), route)
+        assert close(functions._mp_expon_cdf(x) + functions._mp_expon_sf(x), 1)
+        if x < 1e-3:
+            series = mpmath.fsum((-1) ** (k + 1) * x**k / mpmath.factorial(k) for k in range(1, 40))
+            assert close(functions._mp_expon_cdf(x), series)
+
+
+def test_expon_cdf_and_sf_below_the_support():
+    with mpmath.workdps(50):
+        for x in mp(-1e300, -1.0, -0.25, 0.0):
+            assert functions._mp_expon_cdf(x) == 0
+            assert functions._mp_expon_sf(x) == 1
+
+
+@pytest.mark.parametrize("p", [5e-324, 1e-300, 1e-16, 0.25, 0.5, 0.75, 1 - 1e-10, 1 - 2.0**-53])
+def test_expon_ppf_inverts_the_cdf_and_matches_the_log(p):
+    # F(ppf(p)) = p (relative to min(p, 1 - p)), and ppf(p) = -log(1 - p) with
+    # 1 - p exact (1200 bits hold 1 - 2^-1074).
+    with mpmath.workdps(50):
+        (p,) = mp(p)
+        x = functions._mp_expon_ppf(p)
+        if p < 0.5:
+            assert close(functions._mp_expon_cdf(x), p)
+        else:
+            assert close(functions._mp_expon_sf(x), 1 - p)
+        with mpmath.workprec(1200):
+            route = -mpmath.log(1 - p)
+        assert close(x, route)
+        assert functions._mp_expon_ppf(mpmath.mpf(0)) == 0
+
+
+def test_expon_ppf_poles_are_tagged_by_rule():
+    assert functions._expon_ppf_tags(1.0) == [POLE]
+    assert functions._expon_ppf_tags(0.0) == []
+    assert functions._expon_ppf_tags(1 - 2.0**-53) == []
+
+
+def test_expon_condition_numbers_match_the_tolerance_reasons():
+    # cdf: at most 1 (x / (e^x - 1)); sf: x, 708.4 at the last normal result.
+    with mpmath.workdps(30):
+        grid = [x for (x,) in functions.EXPON_CDF.grid() if x > 0]
+        assert max(functions.expon_cdf_condition(x) for x in grid) <= 1
+        last_normal = max(
+            x for x in grid if functions._mp_expon_sf(mpmath.mpf(x)) >= mpmath.mpf(2) ** -1022
+        )
+        assert last_normal == 708.25
+        assert (
+            functions.expon_sf_condition(708.4) * 2.0**-53 < 7.9e-14 < functions.EXPON_SF.tolerance
+        )
+
+
+def test_expon_sf_underflows_where_the_grid_description_says():
+    with mpmath.workdps(30):
+        sf = functions._mp_expon_sf
+        assert sf(mpmath.mpf(708.39)) > mpmath.mpf(2) ** -1022 > sf(mpmath.mpf(708.41))
+        assert sf(mpmath.mpf(745.13)) > mpmath.mpf(2) ** -1075 > sf(mpmath.mpf(745.14))
+        assert functions._mp_expon_cdf(mpmath.mpf(37.4)) < 1 - mpmath.mpf(2) ** -54
+        assert functions._mp_expon_cdf(mpmath.mpf(37.5)) > 1 - mpmath.mpf(2) ** -54
+
+
 @pytest.mark.parametrize(
     ("a", "b", "p"),
     [

@@ -1301,6 +1301,133 @@ GAMMA_PPF = Spec(
     input_tags=_gamma_ppf_tags,
 )
 
+# --- exponential distribution ---------------------------------------------------
+
+
+def _expon_x_grid() -> list[tuple[float]]:
+    # Tiny x (where 1 - e^-x cancels), x = 0..40 step 0.25 (exact; the cdf
+    # rounds to 1 from about 37.4), the edge where e^-x becomes subnormal
+    # (708.40) and 0 (745.13), decades for huge x, and negative x.
+    small = [float(f"1e-{k}") for k in range(1, 21)] + [5e-324, 1e-310]
+    dense = [i / 4 for i in range(161)]
+    edge = [50.0, 100.0, 200.0, 500.0, 700.0, 705.0, 708.0, 708.25, 708.5, 709.0, 709.75,
+            710.0, 720.0, 730.0, 740.0, 744.0, 745.0, 745.125, 745.25, 746.0, 750.0, 1000.0]  # fmt: skip
+    decades = _decades()
+    negative = [-0.25, -1.0, *(-d for d in decades)]
+    return [(x,) for x in sorted(set(small + dense + edge + decades + negative))]
+
+
+def _mp_expon_cdf(x: mpmath.mpf) -> mpmath.mpf:
+    # F(x) = 1 - e^-x = -expm1(-x) for x >= 0 (rate 1), 0 below the support.
+    # mpmath.expm1 keeps full relative precision for tiny x.
+    return -mpmath.expm1(-x) if x > 0 else mpmath.mpf(0)
+
+
+def _mp_expon_sf(x: mpmath.mpf) -> mpmath.mpf:
+    return mpmath.exp(-x) if x > 0 else mpmath.mpf(1)
+
+
+def expon_cdf_condition(x: float) -> mpmath.mpf:
+    """|x f(x) / F(x)| = x / (e^x - 1): at most 1 (its limit at x = 0)."""
+    x = mpmath.mpf(x)
+    return x / mpmath.expm1(x)
+
+
+def expon_sf_condition(x: float) -> mpmath.mpf:
+    """|x f(x) / Q(x)| = x."""
+    return abs(mpmath.mpf(x))
+
+
+def _expon_ppf_tags(p: float) -> list[str]:
+    # The quantile is +inf at p = 1. At p = 0 it is 0, the end of the support:
+    # a finite value, so not a pole.
+    return [POLE] if p == 1.0 else []
+
+
+def _mp_expon_ppf(p: mpmath.mpf) -> mpmath.mpf:
+    # x = -log(1 - p) = -log1p(-p); -p is exact, and mpmath.log1p keeps full
+    # relative precision for tiny p.
+    return -mpmath.log1p(-p)
+
+
+_EXPON_X_DESCRIPTION = (
+    "x = 10^-k for k = 1..20, 5e-324, 1e-310, x = 0..40 step 0.25, 50, 100, 200, 500, 700, "
+    "705, 708, 708.25, 708.5, 709, 709.75, 710, 720, 730, 740, 744, 745, 745.125, 745.25, 746, "
+    "750, 1000, +-10^k for k = -300..300 step 10, -0.25 and -1"
+)
+
+EXPON_CDF = Spec(
+    name="expon_cdf",
+    description=(
+        "Exponential distribution cumulative distribution function 1 - e^-x (rate 1); "
+        "the gamma distribution with shape 1"
+    ),
+    inputs=("x",),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x is an exact double and -expm1(-x) of an exact argument is within an ulp or so in "
+        "any good libm, so nothing beyond a few ulps is unavoidable. The condition number "
+        "|x f(x) / F(x)| = x / (e^x - 1) is at most 1, so even a method that rounds a "
+        "quantity proportional to x (rate times x for another rate) loses at most 2^-53. "
+        "1e-13 as for the other functions; SciPy's worst error here is 2.2e-16 (one subnormal step "
+        "at x = 5e-324 and 1e-310, judged relative to 2.2e-308)"
+    ),
+    grid_description=(
+        f"{_EXPON_X_DESCRIPTION}; F is 0 for x <= 0 and rounds to 1 above about 37.4"
+    ),
+    grid=_expon_x_grid,
+    mpmath_fn=_mp_expon_cdf,
+    scipy_name="scipy.stats.expon.cdf",
+    scipy_fn=st.expon.cdf,
+)
+
+EXPON_SF = Spec(
+    name="expon_sf",
+    description="Exponential distribution survival function e^-x (rate 1)",
+    inputs=("x",),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x is an exact double and exp(-x) of an exact argument is within an ulp or so in any "
+        "good libm. The condition number |x f(x) / Q(x)| = x reaches 708.4 at the last normal "
+        "result, so a method that rounds a quantity proportional to x (rate times x for "
+        "another rate, not checked here) would lose up to 7.9e-14 there; with rate 1 nothing "
+        "is rounded. 1e-13 as for the other functions; SciPy's worst error here is 2.1e-16. "
+        "Results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"the expon_cdf grid: {_EXPON_X_DESCRIPTION}; Q is 1 for x <= 0, subnormal from "
+        "about x = 708.40 and 0 above about 745.13"
+    ),
+    grid=_expon_x_grid,
+    mpmath_fn=_mp_expon_sf,
+    scipy_name="scipy.stats.expon.sf",
+    scipy_fn=st.expon.sf,
+)
+
+EXPON_PPF = Spec(
+    name="expon_ppf",
+    description="Exponential distribution quantile function -log(1 - p) (rate 1)",
+    inputs=("p",),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "p is an exact double, so -p is exact and -log1p(-p) is within an ulp or so in any "
+        "good libm (log(1 - p) also, for p >= 1/2, where 1 - p is exact); nothing beyond a "
+        "few ulps is unavoidable. 1e-13 as for the other functions; SciPy's worst error here "
+        "is 1.6e-16"
+    ),
+    grid_description=(
+        "the norm_ppf grid: p = 10^-k for k = 1..20 and 30..300 step 10, the doubles nearest "
+        "1 - 10^-k for k = 1..16, i/64 for i = 0..64, 1/2 +- 10^-k for k = 5, 10, 15, and "
+        "5e-324, 1e-310, 2^-1022; the quantile is 0 at p = 0 (the end of the support) and "
+        "p = 1 is tagged pole (+inf)"
+    ),
+    grid=_norm_ppf_grid,
+    mpmath_fn=_mp_expon_ppf,
+    scipy_name="scipy.stats.expon.ppf",
+    scipy_fn=st.expon.ppf,
+    input_tags=_expon_ppf_tags,
+)
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -1967,7 +2094,8 @@ TRIGAMMA = Spec(
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
-    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, BETAINCINV, BETA_CDF, BETA_SF,
+    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
+    BETAINCINV, BETA_CDF, BETA_SF,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip
