@@ -1,6 +1,28 @@
-use harness::{Check, Expected, Outcome, Point, finish};
+use harness::{Check, Dataset, Expected, Outcome, Point, finish, workspace_root};
 
 use crate::expected;
+
+/// The points of the gammaln dataset where Gamma(x) is positive or x is a pole.
+/// puruspe documents `ln_gamma` as the logarithm of Gamma, not of |Gamma|, so
+/// where Gamma(x) < 0 (x < 0 with an odd floor) any answer but a value of
+/// ln|Gamma| is outside its contract and those points are not run. The
+/// report counts only these points, and its grid line says so.
+fn gamma_not_negative() -> Dataset {
+    let mut data =
+        Dataset::load(&workspace_root(), "gammaln").unwrap_or_else(|e| panic!("gammaln: {e}"));
+    data.points.retain(|p| {
+        let x = p.scalar("x");
+        x > 0.0 || p.tags.contains(&harness::Tag::Pole) || x.floor().rem_euclid(2.0) == 0.0
+    });
+    data.header.points = data.points.len();
+    data.header.grid = format!(
+        "the points of the gammaln grid where Gamma(x) > 0 or x is a pole, {} of its points \
+         (puruspe's ln_gamma is the logarithm of Gamma, not of |Gamma|). The full grid: {}",
+        data.points.len(),
+        data.header.grid
+    );
+    data
+}
 
 /// `Y_n` through the integer-order function (the data has integer orders only).
 fn yn(p: &Point) -> Outcome {
@@ -50,6 +72,26 @@ fn puruspe_matches_reference() {
             }],
         }
         .run(|p| Outcome::scalar(puruspe::gammp(p.scalar("a"), p.scalar("x")))),
+        Check {
+            function: "puruspe::gammp",
+            dataset: "gammainc_large",
+            expected: &[Expected {
+                finding: "002-puruspe-gammp",
+                points: expected::GAMMP_LARGE,
+            }],
+        }
+        .run(|p| Outcome::scalar(puruspe::gammp(p.scalar("a"), p.scalar("x")))),
+        Check {
+            function: "puruspe::ln_gamma",
+            dataset: "gammaln",
+            expected: &[Expected {
+                finding: "033-puruspe-ln-gamma",
+                points: expected::LN_GAMMA,
+            }],
+        }
+        .run_on(gamma_not_negative(), |p| {
+            Outcome::scalar(puruspe::ln_gamma(p.scalar("x")))
+        }),
         Check {
             function: "puruspe::betai",
             dataset: "betainc",
