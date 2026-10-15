@@ -375,7 +375,8 @@ _Updated at the end of every session. Start here._
     regenerating every dataset changes only those 9 values.
 
 - **Milestone 4, part 13: statrs InverseGamma distribution** (statrs
-  `InverseGamma::cdf`, `sf`, `inverse_cdf`; PR open):
+  `InverseGamma::cdf`, `sf`, `inverse_cdf`;
+  [PR #26](https://github.com/traderhall757-arch/rust-sci-verify/pull/26), merged):
   - New datasets `invgamma_cdf` and `invgamma_sf` (531 points each: 15 shapes
     0.01 to 1e4 x x = 1/t for the gamma_cdf grid's t, plus 0, 5e-324 and
     1e-310; tolerance 1e-12, gamma's, since F(x) = Q(a, 1/x)) and
@@ -404,6 +405,25 @@ _Updated at the end of every session. Start here._
     root (up to 77% off the grid); and at subnormal p (up to 3.8%). Causes 1
     and 2 confirmed with a bit-exact copy of `newton_raphson_quantile`.
     `Chi::inverse_cdf` uses the same search.
+
+- **Milestone 4, part 14: statrs one-sample t-test** (statrs
+  `stats_tests::ttest_onesample`; PR open):
+  - The generator now takes vector inputs (a sample) and several outputs
+    (`docs/data-format.md`); every existing data file regenerates
+    byte-identical.
+  - New dataset `ttest_1samp` (324 points: deterministic samples of n = 2 to
+    100 around 0 and 10, nine hypothesised means, three alternatives; outputs
+    statistic and p-value; |t| from 0.017 to 3410, p down to 4.3e-253;
+    tolerance 5e-12 from the rounding bound max(kappa_p, 1) (kappa_t + n)
+    2^-53, largest 4.5e-12, tested). Reference: exact mean and variance, the
+    `t_cdf` / `t_sf` routes; tested against exact rational arithmetic and the
+    closed forms for 1 and 2 degrees of freedom. SciPy passes every point.
+  - `ttest_onesample` fails 60 points: **finding 026** (high), approved by
+    Claude after the checklist. Two-sided and "greater" p-values are
+    `1 - cdf`: 0 below about 1e-16, digits lost below about 4e-5 (2.9% off
+    at 1.8e-15). Off the grid also up to 2.3e-11 in t when the mean nearly
+    equals mu (plain summation). Both confirmed: `sf` and a compensated sum
+    leave 0 of 2,589 random samples failing.
 
 ## Next
 

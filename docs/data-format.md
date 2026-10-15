@@ -28,6 +28,12 @@ Every **following line** is one point:
   with longer lists, e.g. `"in":{"x":[...4096 samples...],"fs":[1000.0]}` and
   outputs `"f"` and `"Pxx"`. The harness compares lists element by element and
   reports the worst element.
+- Hypothesis tests already use this: a sample is a vector input and the test
+  has two scalar outputs, e.g. `ttest_1samp` with inputs `x` (the sample),
+  `mu`, `alternative` and outputs `statistic` and `pvalue`. In
+  `reference/rsv_reference` a grid point gives a vector input as a tuple of
+  floats, and a `Spec` with several `outputs` returns a tuple from its mpmath
+  and SciPy functions. One tolerance covers all outputs.
 - Numbers are written as the **shortest decimal that reads back to the same
   double** (Python `repr`). The Rust reader parses with `serde_json`'s
   `float_roundtrip` feature, so every value is bit-exact.
