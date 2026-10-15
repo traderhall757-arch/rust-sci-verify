@@ -3,7 +3,7 @@ use std::time::Duration;
 use harness::{Check, Expected, Outcome, finish};
 
 use crate::expected;
-use statrs::distribution::{ChiSquared, ContinuousCDF, Gamma, Normal, StudentsT};
+use statrs::distribution::{Beta, ChiSquared, ContinuousCDF, Gamma, Normal, StudentsT};
 use statrs::function::{erf, gamma};
 
 /// The standard normal distribution (the reference data has mean 0, sd 1).
@@ -35,6 +35,12 @@ fn gamma_dist(a: f64) -> Gamma {
 /// a subnormal quantile, where errors are judged relative to 2.2e-308 anyway.
 fn chi_squared(a: f64) -> ChiSquared {
     ChiSquared::new(2.0 * a).expect("valid parameters")
+}
+
+/// The beta distribution with shapes `a` and `b` (on [0, 1], as in the
+/// reference data).
+fn beta_dist(a: f64, b: f64) -> Beta {
+    Beta::new(a, b).expect("valid parameters")
 }
 
 #[test]
@@ -160,6 +166,38 @@ fn statrs_matches_reference() {
         }
         .run_with_time_limit(TIME_LIMIT, |p| {
             Outcome::scalar(chi_squared(p.scalar("a")).inverse_cdf(p.scalar("p")) / 2.0)
+        }),
+        Check {
+            function: "statrs::distribution::Beta::cdf",
+            dataset: "beta_cdf",
+            expected: &[Expected {
+                finding: "019-statrs-beta-cdf",
+                points: expected::BETA_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(beta_dist(p.scalar("a"), p.scalar("b")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Beta::sf",
+            dataset: "beta_sf",
+            expected: &[Expected {
+                finding: "019-statrs-beta-cdf",
+                points: expected::BETA_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(beta_dist(p.scalar("a"), p.scalar("b")).sf(p.scalar("x")))),
+        // Near the end: it loops forever at 7 points (finding 020); the
+        // abandoned threads only share the CPU with `t_ppf`, whose correct
+        // points need microseconds.
+        Check {
+            function: "statrs::distribution::Beta::inverse_cdf",
+            dataset: "betaincinv",
+            expected: &[Expected {
+                finding: "020-statrs-beta-inverse-cdf",
+                points: expected::BETA_PPF,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| {
+            Outcome::scalar(beta_dist(p.scalar("a"), p.scalar("b")).inverse_cdf(p.scalar("p")))
         }),
         // Last: it loops forever at some points (finding 011), and the
         // abandoned threads keep a CPU busy until the test ends.

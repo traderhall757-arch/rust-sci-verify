@@ -1419,6 +1419,110 @@ BETAINCINV = Spec(
     scipy_fn=sc.betaincinv,
 )
 
+# --- beta_cdf and beta_sf ----------------------------------------------------
+
+# The betainc parameters; x across both tails, the bulk and the ends of the
+# support, plus the mean + k standard deviations (narrow for large a and b).
+_BETA_X = (0.0, 1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.3, 0.5, 0.7, 0.9,
+           0.99, 0.999, 1 - 1e-5, 1 - 1e-10, 1 - 1e-15, 1.0)  # fmt: skip
+_BETA_K = (-10, -3, -1, 0, 1, 3, 10)
+
+
+def _beta_x_grid() -> list[tuple[float, float, float]]:
+    points = set()
+    for a, b in itertools.product(_BETAINC_AB, repeat=2):
+        points.update((a, b, x) for x in _BETA_X)
+        mean = a / (a + b)
+        sd = math.sqrt(a * b / ((a + b) ** 2 * (a + b + 1)))
+        points.update((a, b, x) for k in _BETA_K if 0 < (x := mean + k * sd) < 1)
+    return sorted(points)
+
+
+def _mp_beta_cdf(a: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """I_x(a, b), the beta distribution's cdf at x (0 <= x <= 1).
+
+    The continued fraction on whichever side of the switch point converges
+    (_mp_betainc_tail), with y = 1 - x exact, so neither tail loses relative
+    precision; 0 and 1 at the ends of the support. Tested against
+    mpmath.betainc, the positive-term series and closed forms.
+    """
+    if x == 0 or x == 1:
+        return x
+    return _mp_betainc_tail(a, b, x, mpmath.fsub(1, x, exact=True), lower=True)
+
+
+def _mp_beta_sf(a: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """1 - I_x(a, b), the survival function, with full relative precision in both tails."""
+    if x == 0 or x == 1:
+        return 1 - x
+    return _mp_betainc_tail(a, b, x, mpmath.fsub(1, x, exact=True), lower=False)
+
+
+def beta_prefix_log_magnitude(a: float, b: float, x: float) -> float:
+    """The largest |log| among the factors of the prefix x^a (1-x)^b / B(a, b)
+    when formed separately: a ln x, b ln(1 - x), ln Gamma(a), ln Gamma(b) and
+    ln Gamma(a + b). Rounding each to a double loses this times 2^-53."""
+    a, b, x = mpmath.mpf(a), mpmath.mpf(b), mpmath.mpf(x)
+    y = mpmath.fsub(1, x, exact=True)
+    terms = (a * mpmath.log(x), b * mpmath.log(y), mpmath.loggamma(a), mpmath.loggamma(b),
+             mpmath.loggamma(a + b))  # fmt: skip
+    return float(max(abs(t) for t in terms))
+
+
+_BETA_GRID_DESCRIPTION = (
+    "a, b in {0.1, 0.5, 1, 2, 5, 10, 100, 1000, 10000} x x in {0, 1e-300, 1e-100, 1e-20, "
+    "1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 0.999, and the doubles nearest "
+    "1 - 1e-5, 1 - 1e-10, 1 - 1e-15, 1}, plus x = a/(a+b) + k sd (rounded to a double) for "
+    "k in {-10, -3, -1, 0, 1, 3, 10} where 0 < x < 1, sd the standard deviation of Beta(a, b)"
+)
+
+BETA_CDF = Spec(
+    name="beta_cdf",
+    description=(
+        "Beta distribution cumulative distribution function I_x(a, b) on [0, 1], "
+        "including both tails and the ends of the support"
+    ),
+    inputs=("a", "b", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "Same function as betainc, so betainc's tolerance (accepted by the owner, to be "
+        "revisited). The prefix x^a (1-x)^b / B(a, b) of the smaller of I and 1 - I is a "
+        "product of factors whose logarithms (a ln x, b ln(1 - x), ln Gamma(a), ln Gamma(b), "
+        "ln Gamma(a + b)) reach 1.78e5 in magnitude at a normal result on this grid "
+        "(ln Gamma(2e4) at a = b = 1e4); rounding each to a double separately loses up to "
+        "1.78e5 * 2^-53 = 2.0e-11, while combining them before rounding (Boost's Lanczos-based "
+        "prefix) does not, so 1e-12 demands the careful method. SciPy's worst error here is "
+        "1.1e-13 (a = b = 1000, x = 0.3), except 1.1e-9 at a = b = 1/2, x = 1 - 1e-15, where "
+        "the closed form (2/pi) asin(sqrt x) confirms mpmath. The ends of the support give 0 "
+        "and 1 exactly"
+    ),
+    grid_description=_BETA_GRID_DESCRIPTION,
+    grid=_beta_x_grid,
+    mpmath_fn=_mp_beta_cdf,
+    scipy_name="scipy.stats.beta.cdf",
+    scipy_fn=lambda a, b, x: st.beta.cdf(x, a, b),
+)
+
+BETA_SF = Spec(
+    name="beta_sf",
+    description="Beta distribution survival function 1 - I_x(a, b) on [0, 1]",
+    inputs=("a", "b", "x"),
+    tolerance=1e-12,
+    tolerance_reason=(
+        "1 - I, with beta_cdf's tolerance for the same reasons (largest prefix logarithm "
+        "1.78e5 at a = b = 1e4). Computed as the complement 1 - I only where I is not close to "
+        "1, the upper tail keeps full relative precision, which this tolerance demands down to "
+        "the smallest normal double. SciPy's worst error here is 1.0e-15, except at a = b = 1/2, "
+        "x = 1e-20, where it returns 1 for 1 - (2/pi) 1e-10 (6.4e-11 off; the closed form "
+        "confirms mpmath)"
+    ),
+    grid_description="the beta_cdf grid",
+    grid=_beta_x_grid,
+    mpmath_fn=_mp_beta_sf,
+    scipy_name="scipy.stats.beta.sf",
+    scipy_fn=lambda a, b, x: st.beta.sf(x, a, b),
+)
+
 # --- gammaln and gammasgn --------------------------------------------------
 
 # Near the zeros of log|Gamma| at 1 and 2: x - 1 and x - 2 are exact there.
@@ -1684,6 +1788,6 @@ TRIGAMMA = Spec(
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
-    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, BETAINCINV,
+    T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, BETAINCINV, BETA_CDF, BETA_SF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip

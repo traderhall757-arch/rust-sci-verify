@@ -849,6 +849,112 @@ def test_betaincinv_log_magnitude_matches_the_tolerance_reason():
     assert functions.BETAINCINV.tolerance >= 2 * worst * 2.0**-53
 
 
+# --- beta_cdf, beta_sf ---
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "x"),
+    [(0.5, 2.0, 1e-5), (2.0, 5.0, 0.3), (5.0, 2.0, 0.95), (10.0, 100.0, 0.2), (0.1, 0.5, 0.999)],
+)
+def test_beta_cdf_and_sf_match_mpmath_betainc(a, b, x):
+    # Both sides of the switch point against mpmath's hypergeometric
+    # evaluation, which converges quickly for these moderate parameters.
+    with mpmath.workdps(50):
+        a, b, x = mp(a, b, x)
+        assert close(functions._mp_beta_cdf(a, b, x), mpmath.betainc(a, b, 0, x, regularized=True))
+        assert close(functions._mp_beta_sf(a, b, x), mpmath.betainc(a, b, x, 1, regularized=True))
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "x"),
+    [
+        (1e4, 1e4, 0.46464554479100484),
+        (1e4, 0.1, 0.9998951379361433),
+        (0.1, 1e4, 0.00010486206385669913),
+        (1e3, 1e4, 0.06350021450445349),
+        (100.0, 0.1, 1 - 1e-15),
+        (10.0, 1e4, 1e-20),
+    ],
+)
+def test_beta_cdf_and_sf_match_the_series_in_both_tails(a, b, x):
+    # The positive-term series DLMF 8.17.8 (_mp_betainc) on the smaller tail,
+    # at the points where statrs fails worst: I directly, 1 - I as the
+    # mirrored series I_(1-x)(b, a), so neither forms 1 minus a number near 1.
+    with mpmath.workdps(50):
+        a, b, x = mp(a, b, x)
+        y = mpmath.fsub(1, x, exact=True)
+        assert close(functions._mp_beta_cdf(a, b, x), functions._mp_betainc(a, b, x))
+        assert close(functions._mp_beta_sf(a, b, x), functions._mp_betainc(b, a, y))
+
+
+@pytest.mark.parametrize("x", [1e-300, 1e-20, 1e-5, 0.3, 0.5, 0.9, 1 - 1e-10, 1 - 1e-15])
+def test_beta_cdf_and_sf_match_closed_forms(x):
+    # a = b = 1/2: I = (2/pi) asin(sqrt x), 1 - I = (2/pi) asin(sqrt(1 - x))
+    # (where SciPy is wrong: x = 1e-20 for sf, 1 - 1e-15 for cdf);
+    # b = 1: I = x^a; a = 1: 1 - I = (1 - x)^b.
+    with mpmath.workdps(60):
+        (x,) = mp(x)
+        y = mpmath.fsub(1, x, exact=True)
+        half, three = mpmath.mpf(1) / 2, mpmath.mpf(3)
+        one = mpmath.mpf(1)
+        assert close(
+            functions._mp_beta_cdf(half, half, x), 2 / mpmath.pi * mpmath.asin(mpmath.sqrt(x))
+        )
+        assert close(
+            functions._mp_beta_sf(half, half, x), 2 / mpmath.pi * mpmath.asin(mpmath.sqrt(y))
+        )
+        assert close(functions._mp_beta_cdf(three, one, x), x**three)
+        assert close(functions._mp_beta_sf(one, three, x), y**three)
+
+
+def test_beta_cdf_and_sf_sum_to_one_and_cover_the_ends():
+    with mpmath.workdps(50):
+        for a, b in (mp(0.1, 1e4), mp(2.0, 3.0), mp(1e4, 1e4)):
+            assert functions._mp_beta_cdf(a, b, mpmath.mpf(0)) == 0
+            assert functions._mp_beta_cdf(a, b, mpmath.mpf(1)) == 1
+            assert functions._mp_beta_sf(a, b, mpmath.mpf(0)) == 1
+            assert functions._mp_beta_sf(a, b, mpmath.mpf(1)) == 0
+            for x in mp(1e-300, 0.01, 0.5, 0.99, 1 - 1e-15):
+                total = functions._mp_beta_cdf(a, b, x) + functions._mp_beta_sf(a, b, x)
+                assert close(total, 1)
+
+
+def test_beta_grid_covers_both_tails_the_ends_and_the_bulk():
+    grid = functions._beta_x_grid()
+    assert all(0 <= x <= 1 for _, _, x in grid)
+    assert len(grid) == len(set(grid)) == 1895
+    narrow = [x for a, b, x in grid if (a, b) == (1e4, 1e4)]
+    # The mean +- k sd points of the narrowest distribution are on the grid.
+    assert sum(0.46 < x < 0.54 for x in narrow) == 7
+    assert {0.0, 1.0, 1e-300, 1 - 1e-15} <= set(narrow)
+
+
+def test_beta_prefix_logarithm_matches_the_tolerance_reason():
+    # Over the committed data: the prefix belongs to the smaller of I and
+    # 1 - I, so its rounding error, relative to the dataset's value v, is the
+    # largest prefix logarithm times min(I, 1 - I) / v (times 2^-53). The
+    # worst is ln Gamma(2e4) = 1.78e5 at a = b = 1e4, in both datasets.
+    data = Path(__file__).resolve().parent.parent / "data"
+    rows = {}
+    for name in ("beta_cdf", "beta_sf"):
+        lines = (data / f"{name}.jsonl").read_text().splitlines()[1:]
+        rows[name] = [json.loads(line) for line in lines]
+    for name in ("beta_cdf", "beta_sf"):
+        worst = (0.0, None)
+        for rc, rs in zip(rows["beta_cdf"], rows["beta_sf"], strict=True):
+            a, b, x = (rc["in"][k][0] for k in "abx")
+            i, q = float(rc["mpmath"]["y"][0]), float(rs["mpmath"]["y"][0])
+            v = i if name == "beta_cdf" else q
+            if 0 < x < 1 and v >= 2.0**-1022:
+                loss = functions.beta_prefix_log_magnitude(a, b, x) * min(i, q) / v
+                worst = max(worst, (loss, (a, b)))
+        loss, at = worst
+        assert at == (1e4, 1e4)
+        assert 1.78e5 < loss < 1.781e5
+        assert 1.97e-11 < loss * 2.0**-53 < 1.98e-11  # "2.0e-11"
+        assert loss * 2.0**-53 > functions.BETA_CDF.tolerance == functions.BETA_SF.tolerance
+
+
 # --- gammaln, gammasgn, gammainc_large ---
 
 

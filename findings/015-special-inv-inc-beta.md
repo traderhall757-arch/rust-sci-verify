@@ -36,8 +36,9 @@
 `inc_beta` has its own accuracy problem, [finding 014](014-special-inc-beta.md).
 statrs's `inv_beta_reg` is a port of this function and has the same
 endless loop, start-value failure and stopping rule
-([finding 011](011-statrs-students-t-inverse-cdf.md)); this finding is the
-original.
+([finding 011](011-statrs-students-t-inverse-cdf.md), and through
+`Beta::inverse_cdf` [finding 020](020-statrs-beta-inverse-cdf.md), where
+a NaN start panics instead of looping); this finding is the original.
 
 ## Reproduction
 
