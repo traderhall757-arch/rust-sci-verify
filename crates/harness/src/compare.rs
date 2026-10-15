@@ -75,7 +75,7 @@ impl Verdict {
 fn accepted_at_tag(outcome: &Outcome, point: &Point, tag: Tag) -> bool {
     let values = match outcome {
         Outcome::Error(_) => return true,
-        Outcome::Panic(_) | Outcome::Timeout(_) => return false,
+        Outcome::Panic(_) | Outcome::Timeout(_) | Outcome::Crash(_) => return false,
         Outcome::Value(v) => v,
     };
     let expected = point.mpmath.values().flatten();
@@ -118,7 +118,9 @@ pub fn classify(
     }
     let crate_err = match outcome {
         Outcome::Value(v) => max_error(v, &point.mpmath, outputs),
-        Outcome::Error(_) | Outcome::Panic(_) | Outcome::Timeout(_) => f64::INFINITY,
+        Outcome::Error(_) | Outcome::Panic(_) | Outcome::Timeout(_) | Outcome::Crash(_) => {
+            f64::INFINITY
+        }
     };
     let scipy: Vec<Vec<f64>> = outputs.iter().map(|n| point.scipy[n].clone()).collect();
     let scipy_ok = max_error(&scipy, &point.mpmath, outputs) <= tolerance;
@@ -217,6 +219,7 @@ mod tests {
             c(Outcome::Timeout(std::time::Duration::from_secs(1))),
             Verdict::CrateWrong
         );
+        assert_eq!(c(Outcome::Crash("c".into())), Verdict::CrateWrong);
         assert_eq!(c(Outcome::Value(vec![])), Verdict::CrateWrong);
     }
 

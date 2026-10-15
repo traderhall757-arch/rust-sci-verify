@@ -1000,3 +1000,132 @@ def test_gammainc_large_grid_crosses_1e8_and_reaches_1e20():
     assert any(a == 1e8 and x < 1e8 for a, x in grid)
     assert any(a == 1e8 and x > 1e8 for a, x in grid)
     assert all(any(a == b and 1e8 < x < a for b, x in grid) for a in (1e9, 1e10, 1e15, 1e20))
+
+
+# --- digamma, trigamma ---
+
+
+def _harmonic(n: int) -> mpmath.mpf:
+    return mpmath.fsum(mpmath.mpf(1) / k for k in range(1, n + 1))
+
+
+@pytest.mark.parametrize("n", [1, 2, 7, 30, 180])
+def test_digamma_and_trigamma_match_closed_forms_at_integers_and_half_integers(n):
+    # psi(n) = H_{n-1} - gamma, psi(n + 1/2) = -gamma - 2 log 2 + sum_{k=1}^{n} 2 / (2k - 1),
+    # psi'(n) = pi^2 / 6 - sum_{k<n} 1 / k^2, psi'(n + 1/2) = pi^2 / 2 - sum 4 / (2k - 1)^2
+    # (DLMF 5.4.14, 5.4.15, 5.15.2 with 5.15.5).
+    with mpmath.workdps(50):
+        half = mpmath.mpf(n) + mpmath.mpf(0.5)
+        odd = [mpmath.mpf(2 * k - 1) for k in range(1, n + 1)]
+        assert close(mpmath.digamma(n), _harmonic(n - 1) - mpmath.euler)
+        expected = -mpmath.euler - 2 * mpmath.log(2) + mpmath.fsum(2 / o for o in odd)
+        assert close(mpmath.digamma(half), expected)
+        expected = mpmath.pi**2 / 6 - mpmath.fsum(mpmath.mpf(1) / k**2 for k in range(1, n))
+        assert close(functions._mp_trigamma(mpmath.mpf(n)), expected)
+        expected = mpmath.pi**2 / 2 - mpmath.fsum(4 / o**2 for o in odd)
+        assert close(functions._mp_trigamma(half), expected)
+
+
+def _digamma_by_recurrence(x: mpmath.mpf, n: int) -> mpmath.mpf:
+    # psi(x) = psi(x + n) - sum_{k=0}^{n-1} 1 / (x + k) (DLMF 5.5.2), evaluated by
+    # mpmath at x + n > 0, away from where the dataset's point lies.
+    return mpmath.digamma(x + n) - mpmath.fsum(1 / (x + k) for k in range(n))
+
+
+def _trigamma_by_recurrence(x: mpmath.mpf, n: int) -> mpmath.mpf:
+    return functions._mp_trigamma(x + n) + mpmath.fsum(1 / (x + k) ** 2 for k in range(n))
+
+
+@pytest.mark.parametrize("x", [-0.25, -2.5, -22.75, -29.75, -100.5, -1000.25, -1e-300])
+def test_digamma_and_trigamma_match_the_recurrence_for_negative_x(x):
+    with mpmath.workdps(60):
+        (x,) = mp(x)
+        n = int(-mpmath.floor(x)) + 20
+        assert close(mpmath.digamma(x), _digamma_by_recurrence(x, n), digits=45)
+        assert close(functions._mp_trigamma(x), _trigamma_by_recurrence(x, n), digits=45)
+
+
+@pytest.mark.parametrize("x", [-10000.5, -1000000.5, -999999999999999.5])
+def test_digamma_matches_the_reflection_formula_at_large_negative_x(x):
+    # psi(x) = psi(1 - x) - pi cot(pi x) (DLMF 5.5.4). The recurrence would need
+    # up to 1e15 terms here.
+    with mpmath.workdps(60):
+        (x,) = mp(x)
+        cot = mpmath.cospi(x) / mpmath.sinpi(x)
+        assert close(mpmath.digamma(x), mpmath.digamma(1 - x) - mpmath.pi * cot, digits=45)
+
+
+@pytest.mark.parametrize("x", [-0.25, -2.5, -29.75, -100.5, -10000.5])
+def test_trigamma_reflection_matches_mpmaths_own_route_for_negative_x(x):
+    # The dataset's reflection route against mpmath.psi(1, x), which recurs up
+    # from x and is too slow to use below about -1e4.
+    with mpmath.workdps(50):
+        (x,) = mp(x)
+        assert close(functions._mp_trigamma(x), mpmath.psi(1, x))
+
+
+def test_digamma_matches_the_recurrence_next_to_its_zero():
+    # Next to the zero the value is tiny (2e-17 at the double nearest x0); the
+    # recurrence from x + 40 subtracts terms near 3.7 and keeps 40 of 60 digits.
+    with mpmath.workdps(60):
+        for (x,) in functions.DIGAMMA.grid():
+            if abs(x - functions._DIGAMMA_ROOT) < 1e-4:
+                x = mpmath.mpf(x)
+                assert close(mpmath.digamma(x), _digamma_by_recurrence(x, 40), digits=38)
+        root = mpmath.findroot(mpmath.digamma, 1.46)
+    assert float(root) == functions._DIGAMMA_ROOT
+
+
+@pytest.mark.parametrize("x", [1e10, 1e100, 1e300, 1.7976931348623157e308])
+def test_digamma_and_trigamma_match_the_asymptotic_series_at_large_x(x):
+    # psi(x) = log x - 1 / (2x) - 1 / (12 x^2) + 1 / (120 x^4) - ...,
+    # psi'(x) = 1 / x + 1 / (2 x^2) + 1 / (6 x^3) - 1 / (30 x^5) + ... (DLMF 5.11.2,
+    # 5.15.8); the next terms are below 1e-40 relative for x >= 1e10.
+    with mpmath.workdps(60):
+        (x,) = mp(x)
+        psi = mpmath.log(x) - 1 / (2 * x) - 1 / (12 * x**2) + 1 / (120 * x**4)
+        assert close(mpmath.digamma(x), psi, digits=45)
+        psi1 = 1 / x + 1 / (2 * x**2) + 1 / (6 * x**3) - 1 / (30 * x**5)
+        assert close(functions._mp_trigamma(x), psi1, digits=45)
+
+
+def test_digamma_reflection_amplification_matches_the_tolerance_reason():
+    # The largest cancellation in the reflection formula on the grid (x = -22.75,
+    # next to the zero at -22.7502), against the tolerance's 2.5x margin.
+    with mpmath.workdps(30):
+        worst, at = max(
+            (functions.digamma_reflection_amplification(x), x)
+            for (x,) in functions.DIGAMMA.grid()
+            if x < 0 and x != int(x)
+        )
+        zero = mpmath.findroot(mpmath.digamma, -22.75)
+    assert at == -22.75
+    assert 1312 < worst < 1314
+    assert -22.7503 < zero < -22.7502
+    assert 1.4e-13 < worst * 2.0**-53 < 1.5e-13
+    assert functions.DIGAMMA.tolerance >= 2.5 * worst * 2.0**-53
+
+
+def test_trigamma_reflection_amplification_is_small():
+    # (pi^2 / sin^2 + psi'(1 - x)) / psi'(x) <= (pi^2 + pi^2 / 6) / (pi^2 - pi^2 / 6) = 1.4,
+    # since psi'(1 - x) <= psi'(1) = pi^2 / 6 for x <= 0.
+    with mpmath.workdps(30):
+        for (x,) in functions.TRIGAMMA.grid():
+            if x < 0 and x != int(x) and x > -1e-150:
+                x = mpmath.mpf(x)
+                t1 = mpmath.pi**2 / mpmath.sinpi(x) ** 2
+                t2 = functions._mp_trigamma(1 - x)
+                assert (t1 + t2) / (t1 - t2) <= 1.4
+
+
+def test_polygamma_grids_and_poles():
+    digamma = set(functions.DIGAMMA.grid())
+    trigamma = set(functions.TRIGAMMA.grid())
+    near_root = digamma - trigamma - {(-999999999999999.5,)}
+    assert len(near_root) == 5
+    assert all(abs(x - 1.4616321449683623) <= 1.000001e-5 for (x,) in near_root)
+    poles = {(x,) for (x,) in trigamma if functions.TRIGAMMA.input_tags(x)}
+    assert poles == {(-float(n),) for n in range(31)}
+    assert functions.DIGAMMA.input_tags(-3.0) == [POLE]
+    assert (-999999999999999.5,) in digamma
+    assert min(trigamma) == (-1000000.5,)

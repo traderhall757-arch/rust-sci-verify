@@ -1568,9 +1568,122 @@ GAMMAINC_LARGE = Spec(
     scipy_fn=sc.gammainc,
 )
 
+# --- digamma and trigamma ---------------------------------------------------
+
+# The positive zero of digamma, x0 = 1.46163214496836234126...: the double
+# nearest it, and x0 +- d for d in _DIGAMMA_NEAR_ROOT (rounded to doubles).
+_DIGAMMA_ROOT = 1.4616321449683623
+_DIGAMMA_NEAR_ROOT = (1e-5, 1e-10)
+
+
+def _polygamma_grid() -> list[tuple[float]]:
+    # The gamma grid (x = -30..180 step 0.25 and +-10^-k), plus decades up to
+    # 1e300, the gammaln grid's huge values and large negative non-integers.
+    points = {x for (x,) in _gamma_grid()}
+    points.update(_decades())
+    points.update(_GAMMALN_HUGE)
+    points.update(_GAMMALN_NEGATIVE)
+    return [(x,) for x in sorted(points)]
+
+
+def _digamma_grid() -> list[tuple[float]]:
+    points = {x for (x,) in _polygamma_grid()}
+    points.add(_DIGAMMA_ROOT)
+    for d in _DIGAMMA_NEAR_ROOT:
+        points.update((_DIGAMMA_ROOT + d, _DIGAMMA_ROOT - d))
+    return [(x,) for x in sorted(points)]
+
+
+def digamma_reflection_amplification(x: float) -> mpmath.mpf:
+    """For x < 0: (|psi(1 - x)| + |pi cot(pi x)|) / |psi(x)|.
+
+    The reflection formula psi(x) = psi(1 - x) - pi cot(pi x) subtracts two
+    terms; rounding each to a double costs this many times 2^-53 relative to
+    the result. It is large only near the zeros of psi.
+    """
+    x = mpmath.mpf(x)
+    t1 = mpmath.digamma(1 - x)
+    t2 = mpmath.pi * mpmath.cospi(x) / mpmath.sinpi(x)
+    return (abs(t1) + abs(t2)) / abs(mpmath.digamma(x))
+
+
+DIGAMMA = Spec(
+    name="digamma",
+    description="Digamma function psi(x) = gamma'(x) / gamma(x) for real x",
+    inputs=("x",),
+    tolerance=4e-13,
+    tolerance_reason=(
+        "For x > 0 the value is well conditioned except next to the zero x0 = 1.4616..., where "
+        "careful implementations (Boost, SciPy) expand in x - x0 with x0 held to extra "
+        "precision, so the exact input still gives a result to a few ulps; the grid has the "
+        "double nearest x0 and x0 +- 1e-5, 1e-10 to test this. For x < 0 the reflection formula "
+        "psi(1 - x) - pi cot(pi x) subtracts two terms; rounding them costs (|term 1| + "
+        "|term 2|) / |result| times 2^-53, at most 1313 on this grid (x = -22.75, near a zero "
+        "at -22.7502), so up to 1.5e-13 is unavoidable. 4e-13 allows 2.7x that, as for "
+        "gammaln. SciPy's worst error is 2.8e-13, at that point; elsewhere 2.2e-14"
+    ),
+    grid_description=(
+        "x = -30..180 step 0.25 (poles at 0, -1, ..., -30) and +-10^k for k = -300..-10 step "
+        "10 (the gamma grid), plus 10^k for k = 0..300 step 10, x = 1e305, 2e305, 2.5e305, "
+        "2.6e305, 1e306, 1e307, 1e308 and the largest double, x = -100.5, -1000.25, -10000.5, "
+        "-1000000.5, -999999999999999.5, and next to the positive zero x0 = 1.46163...: the "
+        "double nearest x0 and x0 +- d for d in {1e-5, 1e-10} (rounded to doubles)"
+    ),
+    grid=_digamma_grid,
+    mpmath_fn=mpmath.digamma,
+    scipy_name="scipy.special.digamma",
+    scipy_fn=sc.digamma,
+    input_tags=_gamma_tags,
+)
+
+
+def _trigamma_grid() -> list[tuple[float]]:
+    # SciPy's polygamma(1, x) sums one term per unit step up from negative x
+    # (0.05 s at x = -1e6), so at x = -999999999999999.5 it does not return;
+    # every point needs a SciPy value, so that one point is left out.
+    return [(x,) for (x,) in _polygamma_grid() if x != -999999999999999.5]
+
+
+def _mp_trigamma(x: mpmath.mpf) -> mpmath.mpf:
+    # mpmath.psi(1, x) recurs one step at a time up from negative x (5 s at
+    # x = -1e6, endless at -1e15), so negative x uses the reflection formula
+    # psi'(x) = pi^2 / sin^2(pi x) - psi'(1 - x) (derivative of DLMF 5.5.4).
+    if x < 0:
+        return mpmath.pi**2 / mpmath.sinpi(x) ** 2 - mpmath.psi(1, 1 - x)
+    return mpmath.psi(1, x)
+
+
+def _sc_trigamma(x: float) -> float:
+    return sc.polygamma(1, x)
+
+
+TRIGAMMA = Spec(
+    name="trigamma",
+    description="Trigamma function psi'(x), the derivative of digamma, for real x",
+    inputs=("x",),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "Trigamma is positive and has no zeros. For x > 0 the recurrence and the asymptotic "
+        "series add terms of one sign. For x < 0 the reflection formula pi^2 / sin^2(pi x) - "
+        "psi'(1 - x) subtracts at most psi'(1) = pi^2 / 6 from at least pi^2, so rounding is "
+        "amplified at most 1.4 times, provided sin(pi x) is formed from the exact input (as "
+        "sinpi does). 1e-13 is the tolerance of the other well-conditioned functions"
+    ),
+    grid_description=(
+        "the digamma grid without the points next to its zero and without x = "
+        "-999999999999999.5, where SciPy's polygamma(1, x) does not return (it sums one term "
+        "per unit step from x up)"
+    ),
+    grid=_trigamma_grid,
+    mpmath_fn=_mp_trigamma,
+    scipy_name="scipy.special.polygamma(1, x)",
+    scipy_fn=_sc_trigamma,
+    input_tags=_gamma_tags,
+)
+
 ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF, BETAINCINV,
-    GAMMALN, GAMMASGN, GAMMAINC_LARGE,
+    GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip

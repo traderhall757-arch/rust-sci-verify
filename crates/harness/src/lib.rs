@@ -14,6 +14,7 @@
 mod check;
 mod compare;
 mod data;
+mod isolated;
 mod lockfile;
 mod report;
 
