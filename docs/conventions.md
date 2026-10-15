@@ -57,7 +57,7 @@ A tagged point is a *convention difference* only if the crate returns one of:
 
 Any **finite** value at a pole or overflow point is **crate wrong**. Example:
 statrs `gamma(-6.0)` returning `5.94e12` is a finding, not a convention. A
-**panic** is never accepted: it is always crate wrong.
+**panic** is never accepted: it is always crate wrong; nor is a crash (below).
 
 ### Calls that never return
 
@@ -69,6 +69,21 @@ wrong. The limit is far above the time a correct call takes (check-statrs uses
 5 s for calls that take microseconds), so it only separates an endless loop
 from a slow machine. Abandoned threads run until the test process exits, so
 such a check comes last in its test.
+
+### Calls that end the process
+
+Some failures cannot be caught inside the process: a stack overflow aborts
+it (special's `digamma` recurses once per unit below 8 and does this for
+large negative x, finding 017). A check whose crate function can do this runs
+with `Check::run_isolated`: its points are evaluated in child processes (the
+same test executable, running only that check), one after another. If a
+child dies during a point, the point gets the outcome "crash: stack
+overflow" (or "crash: process ended (...)" for another cause), always crate
+wrong, and a new child continues at the next point. A point with no result
+within the time limit after the previous one gets "no result within N s"
+and its child is killed. Such a check comes first in its test, so that the
+checks before it, which every child skips, do not even load their data
+again.
 
 ## Expected failures
 

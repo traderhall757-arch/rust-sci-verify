@@ -30,6 +30,29 @@ fn inv_inc_beta(a: f64, b: f64, p: f64) -> f64 {
 #[test]
 fn special_matches_reference() {
     let results = [
+        // First, and in child processes: `digamma` recurses once per unit
+        // below 8 with no limit, so for large negative x it overflows the
+        // stack, which aborts the process (finding 017).
+        Check {
+            function: "special::Gamma::digamma",
+            dataset: "digamma",
+            expected: &[Expected {
+                finding: "017-special-digamma",
+                points: expected::DIGAMMA,
+            }],
+        }
+        .run_isolated("verify::special_matches_reference", TIME_LIMIT, |p| {
+            Outcome::scalar(Gamma::digamma(p.scalar("x")))
+        }),
+        Check {
+            function: "special::Gamma::trigamma",
+            dataset: "trigamma",
+            expected: &[Expected {
+                finding: "018-special-trigamma",
+                points: expected::TRIGAMMA,
+            }],
+        }
+        .run(|p| Outcome::scalar(Gamma::trigamma(&p.scalar("x")))),
         Check {
             function: "special::Gamma::gamma",
             dataset: "gamma",
