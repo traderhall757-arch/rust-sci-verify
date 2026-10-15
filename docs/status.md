@@ -297,7 +297,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 11: statrs F distribution** (statrs
   `FisherSnedecor::cdf`, `sf`, `inverse_cdf`;
-  [PR #23](https://github.com/traderhall757-arch/rust-sci-verify/pull/23), open):
+  [PR #23](https://github.com/traderhall757-arch/rust-sci-verify/pull/23), merged):
   - New datasets `f_cdf` and `f_sf` (1999 points each: d1, d2 in {0.5, 1, 2,
     5, 10, 30, 100, 1000, 1e5}, every pair, x 21 values of x from 0 to 1e300
     plus 1 + k s around the bulk; tolerance 1e-12, betainc's; condition
@@ -326,10 +326,24 @@ _Updated at the end of every session. Start here._
     values capped near 2^52 d2 / d1, 0.32% off at the median for d1 = 1e5,
     d2 = 0.5).
 
+- **Faster `reference-fresh`** ([PR #24](https://github.com/traderhall757-arch/rust-sci-verify/pull/24), open):
+  - `python -m rsv_reference` runs each dataset in its own fresh process, in
+    parallel (driver in `rsv_reference/cli.py`): a full run takes 4 m 42 s
+    locally instead of 14 m 46 s, with byte-identical data.
+  - On pull requests, `scripts/select_datasets.py` regenerates only the
+    datasets whose `Spec` reaches changed definitions in `functions.py`
+    (syntax trees), whose data file changed, or that are new. It regenerates
+    everything when the generator, environment, workflow or shared code
+    changed, or when it cannot follow the code. It prints one line per
+    dataset (demo: one Spec changed, 3 s). Guardrail 10 in `docs/guardrails.md`.
+  - `main` (runs no longer cancelled) and a new weekly `reference-fresh` job
+    (opens a `reference-stale` issue) still regenerate everything; the check
+    also fails on untracked data files now.
+
 ## Next
 
-1. **Owner: review and merge [PR #23](https://github.com/traderhall757-arch/rust-sci-verify/pull/23)** (statrs F distribution,
-   findings 021 and 022).
+1. **Owner: review and merge [PR #24](https://github.com/traderhall757-arch/rust-sci-verify/pull/24)** (faster
+   `reference-fresh`). The first dataset PR after it shows the selective run in CI.
 2. **Milestone 4, continued** (next session): more distributions and
    crates, one family per PR. Suggested order: Exponential, Erlang,
    InverseGamma through the gamma functions; the generic `inverse_cdf`
