@@ -2,18 +2,21 @@
 
 - **Crate / version:** statrs 0.19.1 (`statrs::distribution::Gamma` and
   `statrs::distribution::ChiSquared`, method `inverse_cdf` of
-  `ContinuousCDF`; `ChiSquared` calls `Gamma`'s)
+  `ContinuousCDF`; `ChiSquared` and `Erlang` call `Gamma`'s)
 - **Severity:** high (silently wrong answers: about 9.3e-10 instead of
   quantiles down to 1e-300, wrong by factors up to 4e298; 0.2% off near
   p = 1; 2% to 8% off in the far lower tail for large shape)
 - **Status:** approved (Claude, checklist complete, 2026-10-14)
 - **Affected inputs:** 170 of 432 points of `reference/data/gamma_ppf.jsonl`
   for `Gamma` (tolerance 2e-13), and 170 for `ChiSquared` with df = 2a (half
-  its quantile is compared); the exact lists are `GAMMA_PPF` and `CHI2_PPF`
-  in `crates/check-statrs/src/expected.rs` (the two lists differ at 28
-  points, see cause 1), the report is
+  its quantile is compared); the exact lists are `GAMMA_PPF_WHOLE` (111
+  points with a whole-number shape) plus `GAMMA_PPF_FRACTIONAL` (59) and
+  `CHI2_PPF` in `crates/check-statrs/src/expected.rs` (the `Gamma` and
+  `ChiSquared` lists differ at 28 points, see cause 1), the report is
   [reports/statrs-0.19.1.md](../reports/statrs-0.19.1.md). Only rate 1 is
-  checked. Five groups for `Gamma`, by symptom (`ChiSquared` in brackets):
+  checked. `Erlang::inverse_cdf` calls `Gamma`'s, so it fails at exactly the
+  111 points of `GAMMA_PPF_WHOLE` (of the 324 whole-number-shape points;
+  added 2026-10-15). Five groups for `Gamma`, by symptom (`ChiSquared` in brackets):
   1. **Tiny quantiles** (65 [65] points; causes 1 and 4): wherever the true
      quantile is below about 1e-9 (small shape, or small p) the result is
      about 9.3e-10 (2^-30), e.g. 9.3e-10 for the quantile 1e-50 of a = 1.

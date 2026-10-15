@@ -3,7 +3,7 @@
 - **Crate / version:** statrs 0.19.1 (`statrs::distribution::Gamma` and
   `statrs::distribution::ChiSquared`, methods `cdf` and `sf` of
   `ContinuousCDF`; both call `statrs::function::gamma::gamma_lr` /
-  `gamma_ur`)
+  `gamma_ur`; `statrs::distribution::Erlang` calls `Gamma`'s)
 - **Severity:** low (an accuracy loss: up to 1.2e-9 on the grid and
   3.4e-9 off it, about 9 correct digits), plus subnormal results
   flushed to 0
@@ -15,7 +15,11 @@
   [reports/statrs-0.19.1.md](../reports/statrs-0.19.1.md). Only rate 1 is
   checked. `ChiSquared::new(k)` is `Gamma::new(k / 2, 0.5)` and multiplies x
   by 0.5 exactly, so `ChiSquared` with df = 2a at 2x fails at exactly the
-  same points with the same values (checked on both datasets). Two groups,
+  same points with the same values (checked on both datasets). `Erlang`
+  (whole-number shape) calls `Gamma`'s `cdf` and `sf` directly; every point
+  of both lists has a whole-number shape, so `Erlang` fails at all of them
+  (checked on the 409 whole-number-shape points of each dataset, added
+  2026-10-15). Two groups,
   by cause (section "Root cause"):
   1. **Large shape** (41 points, all with a >= 1000): the error grows like
      the shape, worst per shape 1.4e-12 (a = 1000), 2.4e-11 (1e4), 4.3e-10

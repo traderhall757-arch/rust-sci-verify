@@ -18,12 +18,13 @@ from itertools import repeat
 from pathlib import Path
 
 from .functions import ALL
-from .generate import Summary, generate
+from .generate import Summary, check_numpy_dispatch, generate
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 def _generate(name: str, data_dir: Path) -> tuple[Summary, float]:
+    check_numpy_dispatch()  # each worker imports NumPy afresh
     (spec,) = [s for s in ALL if s.name == name]
     start = time.perf_counter()
     summary = generate(spec, data_dir)
@@ -31,6 +32,7 @@ def _generate(name: str, data_dir: Path) -> tuple[Summary, float]:
 
 
 def main(argv: list[str], data_dir: Path = DATA_DIR) -> int:
+    check_numpy_dispatch()
     wanted = set(argv)
     unknown = wanted - {s.name for s in ALL}
     if unknown:

@@ -4,7 +4,7 @@ import mpmath
 import numpy as np
 
 from rsv_reference import functions
-from rsv_reference.generate import generate, record
+from rsv_reference.generate import check_numpy_dispatch, generate, record
 from rsv_reference.spec import OVERFLOW, POLE, Spec
 
 
@@ -75,3 +75,12 @@ def test_erfcx_asymptotic_branch_matches_direct_formula():
         direct = mpmath.exp(x * x) * mpmath.erfc(x)
         series = functions._mp_erfcx(x * (1 + mpmath.mpf(10) ** -45))  # forces series branch
         assert abs(series / direct - 1) < mpmath.mpf(10) ** -40
+
+
+def test_numpy_runs_the_same_simd_code_on_every_machine():
+    # The package pins NumPy below AVX-512 so SciPy values do not depend on the CPU.
+    check_numpy_dispatch()
+    import numpy as np
+
+    # A point where NumPy's AVX-512 exp and the C library's differ in the last bit.
+    assert float(np.exp(np.float64(-9.5))) == math.exp(-9.5)

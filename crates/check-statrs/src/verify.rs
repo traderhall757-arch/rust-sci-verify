@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use harness::{Check, Expected, Outcome, finish};
+use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 
 use crate::expected;
 use statrs::distribution::{
-    Beta, ChiSquared, ContinuousCDF, FisherSnedecor, Gamma, Normal, StudentsT,
+    Beta, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, Normal, StudentsT,
 };
 use statrs::function::{erf, gamma};
 
@@ -37,6 +37,39 @@ fn gamma_dist(a: f64) -> Gamma {
 /// a subnormal quantile, where errors are judged relative to 2.2e-308 anyway.
 fn chi_squared(a: f64) -> ChiSquared {
     ChiSquared::new(2.0 * a).expect("valid parameters")
+}
+
+/// The exponential distribution with rate 1 (the reference data's).
+fn exponential() -> Exp {
+    Exp::new(1.0).expect("valid parameters")
+}
+
+/// The points of a gamma dataset whose shape `a` is a whole number, the shapes
+/// an Erlang distribution can have (1, 2, 3, 5, 10, 20, 50, 100, 1e3, 1e4, 1e5
+/// and 1e6 on these grids). The report counts only these points, and its
+/// grid line says so.
+fn integer_shapes(name: &str) -> Dataset {
+    let mut data = Dataset::load(&workspace_root(), name).unwrap_or_else(|e| panic!("{name}: {e}"));
+    data.points.retain(|p| p.scalar("a").fract() == 0.0);
+    data.header.points = data.points.len();
+    data.header.grid = format!(
+        "the whole-number shapes of the {name} grid (a = 1, 2, 3, 5, 10, 20, 50, 100, 1e3, \
+         1e4, 1e5, 1e6), {} of its points. The full grid: {}",
+        data.points.len(),
+        data.header.grid
+    );
+    data
+}
+
+/// The Erlang distribution with shape `a` (a whole number) and rate 1; the
+/// gamma distribution with the same parameters.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "`a` is a whole number from 1 to 1e6 (`integer_shapes`)"
+)]
+fn erlang(a: f64) -> Erlang {
+    Erlang::new(a as u64, 1.0).expect("valid parameters")
 }
 
 /// The beta distribution with shapes `a` and `b` (on [0, 1], as in the
@@ -163,10 +196,16 @@ fn statrs_matches_reference() {
         Check {
             function: "statrs::distribution::Gamma::inverse_cdf",
             dataset: "gamma_ppf",
-            expected: &[Expected {
-                finding: "013-statrs-gamma-inverse-cdf",
-                points: expected::GAMMA_PPF,
-            }],
+            expected: &[
+                Expected {
+                    finding: "013-statrs-gamma-inverse-cdf",
+                    points: expected::GAMMA_PPF_WHOLE,
+                },
+                Expected {
+                    finding: "013-statrs-gamma-inverse-cdf",
+                    points: expected::GAMMA_PPF_FRACTIONAL,
+                },
+            ],
         }
         .run_with_time_limit(TIME_LIMIT, |p| {
             Outcome::scalar(gamma_dist(p.scalar("a")).inverse_cdf(p.scalar("p")))
@@ -181,6 +220,64 @@ fn statrs_matches_reference() {
         }
         .run_with_time_limit(TIME_LIMIT, |p| {
             Outcome::scalar(chi_squared(p.scalar("a")).inverse_cdf(p.scalar("p")) / 2.0)
+        }),
+        Check {
+            function: "statrs::distribution::Exp::cdf",
+            dataset: "expon_cdf",
+            expected: &[Expected {
+                finding: "023-statrs-exp-cdf",
+                points: expected::EXP_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(exponential().cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Exp::sf",
+            dataset: "expon_sf",
+            expected: &[],
+        }
+        .run(|p| Outcome::scalar(exponential().sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Exp::inverse_cdf",
+            dataset: "expon_ppf",
+            expected: &[],
+        }
+        .run(|p| Outcome::scalar(exponential().inverse_cdf(p.scalar("p")))),
+        // `Erlang` calls `Gamma` for `cdf`, `sf` and `inverse_cdf`, so these
+        // three run on the gamma datasets' whole-number shapes and fail
+        // exactly where `Gamma` does.
+        Check {
+            function: "statrs::distribution::Erlang::cdf",
+            dataset: "gamma_cdf",
+            expected: &[Expected {
+                finding: "012-statrs-gamma-cdf",
+                points: expected::GAMMA_CDF,
+            }],
+        }
+        .run_on(integer_shapes("gamma_cdf"), |p| {
+            Outcome::scalar(erlang(p.scalar("a")).cdf(p.scalar("x")))
+        }),
+        Check {
+            function: "statrs::distribution::Erlang::sf",
+            dataset: "gamma_sf",
+            expected: &[Expected {
+                finding: "012-statrs-gamma-cdf",
+                points: expected::GAMMA_SF,
+            }],
+        }
+        .run_on(integer_shapes("gamma_sf"), |p| {
+            Outcome::scalar(erlang(p.scalar("a")).sf(p.scalar("x")))
+        }),
+        // Time-limited like `Gamma::inverse_cdf`, which it calls.
+        Check {
+            function: "statrs::distribution::Erlang::inverse_cdf",
+            dataset: "gamma_ppf",
+            expected: &[Expected {
+                finding: "013-statrs-gamma-inverse-cdf",
+                points: expected::GAMMA_PPF_WHOLE,
+            }],
+        }
+        .run_on_with_time_limit(integer_shapes("gamma_ppf"), TIME_LIMIT, |p| {
+            Outcome::scalar(erlang(p.scalar("a")).inverse_cdf(p.scalar("p")))
         }),
         Check {
             function: "statrs::distribution::Beta::cdf",
