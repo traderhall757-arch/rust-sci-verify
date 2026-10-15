@@ -1757,3 +1757,63 @@ def test_f_oneway_rounding_bound_matches_the_tolerance_reason():
         )
     assert 4.1e-12 < worst <= functions.F_ONEWAY.tolerance
     assert point[1] == (30.0, 30.0, 30.0) and point[0][0] == 99.5
+
+
+@pytest.mark.parametrize("x", [s for s in functions._skewtest_samples()[::3] if len(s) <= 50])
+def test_skewness_matches_exact_rational_arithmetic(x):
+    # b1^2 = m3^2 / m2^3 with the biased central moments, exactly.
+    from fractions import Fraction
+
+    xs = [Fraction(v) for v in x]
+    n = len(xs)
+    mean = sum(xs) / n
+    m2 = sum((v - mean) ** 2 for v in xs) / n
+    m3 = sum((v - mean) ** 3 for v in xs) / n
+    with mpmath.workdps(50):
+        b1 = functions._mp_skew_root_b1(mp(*x))
+        exact = m3**2 / m2**3
+        assert close(b1 * b1, mpmath.mpf(exact.numerator) / exact.denominator) or exact == 0
+        assert (b1 > 0) == (m3 > 0) and (b1 == 0) == (m3 == 0)
+
+
+def test_skewtest_matches_the_published_example():
+    # SciPy's documented example (also in statrs's tests): z = 2.7788579769903414,
+    # two-sided p = 0.005455036974740185, both to all digits shown.
+    x = [148.0, 154.0, 158.0, 160.0, 161.0, 162.0, 166.0, 170.0, 182.0, 195.0, 236.0]
+    with mpmath.workdps(50):
+        z, p = functions._mp_skewtest(mp(*x), mpmath.mpf(0))
+        assert abs(z - mpmath.mpf("2.7788579769903414")) < 1e-15
+        assert abs(p - mpmath.mpf("0.005455036974740185")) < 1e-17
+
+
+@pytest.mark.parametrize("alt", [-1.0, 0.0, 1.0])
+def test_skewtest_pvalue_matches_the_normal_cdf(alt):
+    # The erfc forms against mpmath.ncdf (a different function) on both sides.
+    with mpmath.workdps(50):
+        for z in mp(-12.1, -3.4, -0.03, 0.09, 2.6, 12.1):
+            phi = mpmath.ncdf
+            expected = {-1.0: phi(z), 1.0: phi(-z), 0.0: 2 * phi(-abs(z))}[alt]
+            assert close(functions._mp_norm_tail(z, alt), expected, digits=35)
+
+
+def test_skewtest_symmetric_samples_have_zero_statistic_and_exact_double_moments():
+    # The symmetric samples (values loc + i - (n + 1) / 2) have z = 0, p = 1 (two-sided)
+    # and 1/2; and every operation in their moments is exact in double arithmetic
+    # (half-integers, cubes far below 2^53), so a careful method returns z = 0 too.
+    symmetric = [x for x in functions._skewtest_samples() if x[1] - x[0] == 1.0]
+    assert len(symmetric) == 2 * len(functions._SKEW_N)
+    for x in symmetric:
+        with mpmath.workdps(50):
+            assert functions._mp_skewtest(mp(*x), mpmath.mpf(0)) == (0, 1)
+        mean = sum(x) / len(x)
+        assert mean * len(x) == math.fsum(x)  # the double mean is exact
+        assert sum((v - mean) ** 3 for v in x) == 0.0
+
+
+def test_skewtest_rounding_bound_matches_the_tolerance_reason():
+    with mpmath.workdps(30):
+        worst, point = max(
+            (functions.skewtest_rounding_bound(*p), p) for p in functions._skewtest_grid()
+        )
+    assert 1.6e-12 < worst <= functions.SKEWTEST.tolerance
+    assert len(point[0]) == 100
