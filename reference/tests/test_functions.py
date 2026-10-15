@@ -1664,3 +1664,96 @@ def test_ttest_rounding_bound_matches_the_tolerance_reason():
         assert (len(point[0]), point[1]) == (100, 9.99)
         assert 3.9e4 < kappa_t < 4.1e4
         assert max(functions.ttest_condition(*p)[1] for p in functions._ttest_grid()) < 99.1
+
+
+def _exact_chisquare(obs, exp):
+    from fractions import Fraction
+
+    return sum(
+        (Fraction(o) - Fraction(e)) ** 2 / Fraction(e) for o, e in zip(obs, exp, strict=True)
+    )
+
+
+@pytest.mark.parametrize("point", functions._chisquare_grid()[::5])
+def test_chisquare_statistic_matches_exact_rational_arithmetic(point):
+    obs, exp, ddof = point
+    exact = _exact_chisquare(obs, exp)
+    with mpmath.workdps(50):
+        stat, _ = functions._mp_chisquare(mp(*obs), mp(*exp), mpmath.mpf(ddof))
+        assert close(stat, mpmath.mpf(exact.numerator) / exact.denominator)
+
+
+@pytest.mark.parametrize(
+    "point", [p for p in functions._chisquare_grid() if len(p[0]) - 1 - p[2] in (1, 2)]
+)
+def test_chisquare_pvalue_matches_closed_forms_and_gammainc(point):
+    # dof = 1: Q = erfc(sqrt(x / 2)); dof = 2: Q = e^(-x / 2); any dof:
+    # mpmath.gammainc(dof / 2, x / 2, inf).
+    obs, exp, ddof = point
+    dof = len(obs) - 1 - ddof
+    with mpmath.workdps(50):
+        stat, p = functions._mp_chisquare(mp(*obs), mp(*exp), mpmath.mpf(ddof))
+        closed = mpmath.erfc(mpmath.sqrt(stat / 2)) if dof == 1 else mpmath.exp(-stat / 2)
+        assert close(p, closed)
+        assert close(
+            p, mpmath.gammainc(mpmath.mpf(dof) / 2, stat / 2, mpmath.inf, regularized=True)
+        )
+
+
+def test_chisquare_rounding_bound_matches_the_tolerance_reason():
+    with mpmath.workdps(30):
+        bounds = []
+        for point in functions._chisquare_grid():
+            _, p = functions._mp_chisquare(mp(*point[0]), mp(*point[1]), mpmath.mpf(point[2]))
+            if p >= mpmath.mpf(2) ** -1022:  # p-values that round to 0 are not at risk
+                bounds.append((functions.chisquare_rounding_bound(*point), point))
+        worst, point = max(bounds)
+    assert 4.2e-12 < worst <= functions.CHISQUARE.tolerance
+    assert len(point[0]) == 30
+
+
+def _exact_anova_f(x, sizes):
+    from fractions import Fraction
+
+    groups = functions._anova_groups([Fraction(v) for v in x], sizes)
+    n, k = len(x), len(groups)
+    mean = sum(sum(g) for g in groups) / n
+    means = [sum(g) / len(g) for g in groups]
+    ssb = sum(len(g) * (m - mean) ** 2 for g, m in zip(groups, means, strict=True))
+    ssw = sum((v - m) ** 2 for g, m in zip(groups, means, strict=True) for v in g)
+    return (ssb / (k - 1)) / (ssw / (n - k))
+
+
+@pytest.mark.parametrize("point", functions._f_oneway_grid()[::3])
+def test_f_oneway_statistic_matches_exact_rational_arithmetic(point):
+    exact = _exact_anova_f(*point)
+    with mpmath.workdps(50):
+        f, _ = functions._mp_f_oneway(mp(*point[0]), mp(*point[1]))
+        assert close(f, mpmath.mpf(exact.numerator) / exact.denominator)
+
+
+@pytest.mark.parametrize("point", functions._f_oneway_grid())
+def test_f_oneway_pvalue_matches_betainc_and_the_two_sample_t_test(point):
+    # p = I_y(d2 / 2, d1 / 2) with y = d2 / (d2 + d1 F) by mpmath.betainc, which
+    # includes the points where SciPy is off (p below 1e-52); for two groups
+    # F = t^2 for the pooled two-sample t, so p = 2 sf_t(sqrt F) with N - 2
+    # degrees of freedom.
+    x, sizes = point
+    with mpmath.workdps(50):
+        f, p = functions._mp_f_oneway(mp(*x), mp(*sizes))
+        d1, d2 = mpmath.mpf(len(sizes) - 1), mpmath.mpf(len(x) - len(sizes))
+        with mpmath.extraprec(60):
+            y = d2 / (d2 + d1 * f)
+            beta = mpmath.betainc(d2 / 2, d1 / 2, 0, y, regularized=True)
+        assert close(p, beta, digits=35)
+        if len(sizes) == 2:
+            assert close(p, 2 * functions._mp_t_sf(d2, mpmath.sqrt(f)))
+
+
+def test_f_oneway_rounding_bound_matches_the_tolerance_reason():
+    with mpmath.workdps(30):
+        worst, point = max(
+            (functions.f_oneway_rounding_bound(*p), p) for p in functions._f_oneway_grid()
+        )
+    assert 4.1e-12 < worst <= functions.F_ONEWAY.tolerance
+    assert point[1] == (30.0, 30.0, 30.0) and point[0][0] == 99.5

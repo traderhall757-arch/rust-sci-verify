@@ -1713,6 +1713,212 @@ TTEST_1SAMP = Spec(
     scipy_fn=_sc_ttest_1samp,
 )
 
+# --- hypothesis tests: chi-squared goodness of fit -------------------------------
+
+# Expected frequencies e_i either equal (total / k, statrs's default) or
+# proportional to 1, 2, .., k, and observed counts o_i = round(e_i (1 + delta z_i))
+# with the z pattern of the t-test samples; the expected frequencies are then
+# rescaled to the counts' sum, as the test requires. The statistic is about
+# delta^2 total / 12: from about 1e-5 to 900.
+_CHISQ_K = (2, 3, 5, 10, 30)
+_CHISQ_TOTAL = (100, 10**4, 10**6)
+_CHISQ_DELTA = (0.001, 0.01, 0.03, 0.1)
+
+
+def _chisquare_grid() -> list[tuple[tuple[float, ...], tuple[float, ...], float]]:
+    points = []
+    for k in _CHISQ_K:
+        z = [((7919 * i) % 1000 - 500) / 1000 for i in range(k)]
+        for weights in ([1] * k, list(range(1, k + 1))):
+            for total in _CHISQ_TOTAL:
+                for delta in _CHISQ_DELTA:
+                    e0 = [total * w / sum(weights) for w in weights]
+                    obs = tuple(float(round(e * (1 + delta * zi))) for e, zi in zip(e0, z))
+                    exp = tuple(sum(obs) * w / sum(weights) for w in weights)
+                    if obs == exp:
+                        continue  # rounding left the counts at their expectation
+                    for ddof in (0.0, 1.0):
+                        if ddof < k - 1:
+                            points.append((obs, exp, ddof))
+    return points
+
+
+def _mp_chisquare(obs: list[mpmath.mpf], exp: list[mpmath.mpf], ddof: mpmath.mpf):
+    """(statistic, p-value): sum (o - e)^2 / e and Q(dof / 2, statistic / 2) with
+    dof = k - 1 - ddof (the chi-squared survival function, the gamma_sf route)."""
+    with mpmath.extraprec(60):
+        stat = mpmath.fsum((o - e) ** 2 / e for o, e in zip(obs, exp, strict=True))
+        dof = len(obs) - 1 - ddof
+        return stat, _mp_gamma_sf(dof / 2, stat / 2)
+
+
+def chisquare_rounding_bound(obs: tuple, exp: tuple, ddof: float) -> float:
+    """max(kappa_p, 1) (kappa_s + k) 2^-53: what a careful method may lose.
+
+    kappa_s = sum |o - e| |o + e| / e / statistic is the statistic's relative
+    condition number in the expected frequencies (the counts are exact);
+    kappa_p = |x f(x) / Q| is the p-value's in the statistic x."""
+    o = [mpmath.mpf(v) for v in obs]
+    e = [mpmath.mpf(v) for v in exp]
+    stat, _ = _mp_chisquare(o, e, mpmath.mpf(ddof))
+    kappa_s = mpmath.fsum(abs(a - b) * abs(a + b) / b for a, b in zip(o, e, strict=True)) / stat
+    a = (len(o) - 1 - ddof) / mpmath.mpf(2)
+    kappa_p = gamma_sf_condition(a, stat / 2)
+    return float(max(kappa_p, 1) * (kappa_s + len(o)) * mpmath.mpf(2) ** -53)
+
+
+def _sc_chisquare(obs: list[float], exp: list[float], ddof: float) -> tuple[float, float]:
+    r = st.chisquare(obs, exp, ddof=int(ddof))
+    return float(r.statistic), float(r.pvalue)
+
+
+CHISQUARE = Spec(
+    name="chisquare",
+    description=(
+        "Chi-squared goodness-of-fit test: statistic sum (o - e)^2 / e over k categories and "
+        "its p-value, the chi-squared survival function with k - 1 - ddof degrees of freedom"
+    ),
+    inputs=("f_obs", "f_exp", "ddof"),
+    outputs=("statistic", "pvalue"),
+    tolerance=5e-12,
+    tolerance_reason=(
+        "For both outputs, as for ttest_1samp. The counts are exact and the statistic is a "
+        "sum of k positive terms, off by up to about (kappa_s + k) 2^-53 in a careful method, "
+        "kappa_s being its relative condition number in the expected frequencies "
+        "(chisquare_rounding_bound); the p-value adds kappa_p = |x f(x) / Q|, about half the "
+        "statistic in the tail (431 at most where the p-value is a normal double). The largest "
+        "bound max(kappa_p, 1) (kappa_s + k) 2^-53 there is 4.2e-12 (k = 30 equal expected "
+        "frequencies, total 1e6, delta 0.1, ddof 1: statistic 888, p 6.1e-169); 5e-12 as for "
+        "ttest_1samp (tested). P-values that round to 0 (4 points) are exact in any method. "
+        "SciPy's worst error is 1.9e-13"
+    ),
+    grid_description=(
+        "k in {2, 3, 5, 10, 30} categories; expected frequencies equal or proportional to 1, 2, "
+        "..., k; totals 100, 1e4, 1e6; observed counts round(e_i (1 + delta z_i)) with "
+        "z_i = ((7919 i) mod 1000 - 500) / 1000 and delta in {0.001, 0.01, 0.03, 0.1} (skipped "
+        "where every count equals its expectation), the expected frequencies rescaled to the "
+        "counts' sum; ddof 0 and, where k > 2, 1. Statistic from 1e-3 to 2120, p-value from 0 "
+        "to 1"
+    ),
+    grid=_chisquare_grid,
+    mpmath_fn=_mp_chisquare,
+    scipy_name="scipy.stats.chisquare",
+    scipy_fn=_sc_chisquare,
+)
+
+# --- hypothesis tests: one-way analysis of variance -----------------------------
+
+# Groups of the given sizes, all values in one sample x with the sizes as a
+# second input; value i (counted over all groups) of group j is
+# loc + z_i + delta j, with the t-test pattern z.
+_ANOVA_SIZES = ((2, 2), (3, 3, 3), (2, 4, 6, 8, 10), (30, 30, 30))
+_ANOVA_LOC = (0.0, 100.0)
+_ANOVA_DELTA = (0.001, 0.03, 0.3, 1.0, 3.0, 30.0)
+
+
+def _f_oneway_grid() -> list[tuple[tuple[float, ...], tuple[float, ...]]]:
+    points = []
+    for sizes in _ANOVA_SIZES:
+        for loc in _ANOVA_LOC:
+            for delta in _ANOVA_DELTA:
+                x, i = [], 0
+                for j, size in enumerate(sizes):
+                    for _ in range(size):
+                        x.append(loc + ((7919 * i) % 1000 - 500) / 1000 + delta * j)
+                        i += 1
+                points.append((tuple(x), tuple(float(v) for v in sizes)))
+    return points
+
+
+def _anova_groups(x: list, sizes: list) -> list[list]:
+    groups, start = [], 0
+    for size in sizes:
+        groups.append(x[start : start + int(size)])
+        start += int(size)
+    return groups
+
+
+def _mp_anova_parts(x: list[mpmath.mpf], sizes: list[mpmath.mpf]):
+    """(ssb, ssw, d1, d2) with 60 extra bits."""
+    groups = _anova_groups(x, sizes)
+    with mpmath.extraprec(60):
+        mean = mpmath.fsum(x) / len(x)
+        means = [mpmath.fsum(g) / len(g) for g in groups]
+        ssb = mpmath.fsum(len(g) * (m - mean) ** 2 for g, m in zip(groups, means, strict=True))
+        ssw = mpmath.fsum((v - m) ** 2 for g, m in zip(groups, means, strict=True) for v in g)
+    return ssb, ssw, mpmath.mpf(len(groups) - 1), mpmath.mpf(len(x) - len(groups))
+
+
+def _mp_f_oneway(x: list[mpmath.mpf], sizes: list[mpmath.mpf]):
+    """(F, p-value): F = (ssb / (k - 1)) / (ssw / (N - k)) and the F survival function."""
+    ssb, ssw, d1, d2 = _mp_anova_parts(x, sizes)
+    with mpmath.extraprec(60):
+        f = (ssb / d1) / (ssw / d2)
+    return f, _mp_f_sf(d1, d2, f)
+
+
+def f_oneway_rounding_bound(x: tuple, sizes: tuple) -> float:
+    """max(kappa_p, 1) (kappa_F + N) 2^-53: what a careful (two-pass) method may lose.
+
+    kappa_F = kappa_ssb + kappa_ssw bounds F's relative condition number in the
+    data: perturbing x_i by eps x_i moves ssw by up to 2 eps |x_i - m_j| |x_i|
+    and ssb by up to 2 eps |m_j - m| |x_i| (1 - n_j / N); kappa_p = |F f(F) / Q|.
+    """
+    xs = [mpmath.mpf(v) for v in x]
+    groups = _anova_groups(xs, sizes)
+    n = len(xs)
+    ssb, ssw, d1, d2 = _mp_anova_parts(xs, [mpmath.mpf(v) for v in sizes])
+    mean = mpmath.fsum(xs) / n
+    k_ssw = k_ssb = mpmath.mpf(0)
+    for g in groups:
+        m = mpmath.fsum(g) / len(g)
+        k_ssw += mpmath.fsum(2 * abs(v - m) * abs(v) for v in g)
+        k_ssb += mpmath.fsum(2 * abs(m - mean) * abs(v) * (1 - mpmath.mpf(len(g)) / n) for v in g)
+    kappa_f = k_ssw / ssw + k_ssb / ssb
+    f = (ssb / d1) / (ssw / d2)
+    kappa_p = f_condition(float(d1), float(d2), float(f), upper=True)
+    return float(max(kappa_p, 1) * (kappa_f + n) * mpmath.mpf(2) ** -53)
+
+
+def _sc_f_oneway(x: list[float], sizes: list[float]) -> tuple[float, float]:
+    r = st.f_oneway(*_anova_groups(x, sizes))
+    return float(r.statistic), float(r.pvalue)
+
+
+F_ONEWAY = Spec(
+    name="f_oneway",
+    description=(
+        "One-way analysis of variance: F = (between-group mean square) / (within-group mean "
+        "square) for k groups of N values and its p-value, the F survival function with "
+        "k - 1 and N - k degrees of freedom; the groups are given as one sample x and their "
+        "sizes"
+    ),
+    inputs=("x", "sizes"),
+    outputs=("statistic", "pvalue"),
+    tolerance=5e-12,
+    tolerance_reason=(
+        "For both outputs, as for ttest_1samp. The inputs are exact, but F is formed from sums "
+        "of N rounded terms, so a careful (two-pass) method is off by up to about "
+        "(kappa_F + N) 2^-53, kappa_F being F's relative condition number in the data "
+        "(f_oneway_rounding_bound); the p-value adds kappa_p = |F f(F) / Q|. The largest bound "
+        "max(kappa_p, 1) (kappa_F + N) 2^-53 on this grid is 4.2e-12 (three groups of 30 "
+        "around 100 with delta 30: F = 3.0e5, kappa_p = 43); 5e-12 as for ttest_1samp "
+        "(tested). SciPy's worst error at the points it gets within tolerance is 1.7e-12; it "
+        "is off at 4: one statistic (5.1e-12, F = 1.2e5) and three p-values below 1e-52 "
+        "(2.0e-11 to 7.5e-11)"
+    ),
+    grid_description=(
+        "group sizes (2, 2), (3, 3, 3), (2, 4, 6, 8, 10), (30, 30, 30); value i (counted over "
+        "all groups) of group j is loc + ((7919 i) mod 1000 - 500) / 1000 + delta j for loc in "
+        "{0, 100} and delta in {0.001, 0.03, 0.3, 1, 3, 30}; x lists all values and sizes the "
+        "group sizes. F from 0.33 to 3.0e5, p-value from 5.8e-168 to 0.72"
+    ),
+    grid=_f_oneway_grid,
+    mpmath_fn=_mp_f_oneway,
+    scipy_name="scipy.stats.f_oneway",
+    scipy_fn=_sc_f_oneway,
+)
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -2381,7 +2587,7 @@ ALL: tuple[Spec, ...] = (
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
     INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
-    BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP,
+    BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip

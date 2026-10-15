@@ -8,6 +8,8 @@ use statrs::distribution::{
     StudentsT,
 };
 use statrs::function::{erf, gamma};
+use statrs::stats_tests::chisquare::chisquare;
+use statrs::stats_tests::f_oneway::f_oneway;
 use statrs::stats_tests::ttest_onesample::ttest_onesample;
 use statrs::stats_tests::{Alternative, NaNPolicy};
 
@@ -109,6 +111,65 @@ fn statistic_and_pvalue<E: std::fmt::Debug>(r: Result<(f64, f64), E>) -> Outcome
         Ok((statistic, pvalue)) => Outcome::Value(vec![vec![statistic], vec![pvalue]]),
         Err(e) => Outcome::Error(format!("{e:?}")),
     }
+}
+
+/// The counts of a chisquare point (whole numbers in the data).
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the counts are whole numbers from 0 to about 1e6"
+)]
+fn counts(p: &harness::Point) -> Vec<usize> {
+    p.inputs["f_obs"].iter().map(|&c| c as usize).collect()
+}
+
+/// The `ddof` of a chisquare point (0 or 1 in the data).
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "ddof is 0 or 1"
+)]
+fn ddof(p: &harness::Point) -> usize {
+    p.scalar("ddof") as usize
+}
+
+/// The points of the chisquare dataset whose expected frequencies are all
+/// equal, the ones statrs assumes when `f_exp` is `None`. The report counts
+/// only these points, and its grid line says so.
+fn equal_expected() -> Dataset {
+    let mut data =
+        Dataset::load(&workspace_root(), "chisquare").unwrap_or_else(|e| panic!("chisquare: {e}"));
+    // Exactly equal: the generator gives every category the same double.
+    data.points.retain(|p| {
+        let first = p.inputs["f_exp"][0].to_bits();
+        p.inputs["f_exp"].iter().all(|e| e.to_bits() == first)
+    });
+    data.header.points = data.points.len();
+    data.header.grid = format!(
+        "the points of the chisquare grid with equal expected frequencies, {} of its points, \
+         run with f_exp = None. The full grid: {}",
+        data.points.len(),
+        data.header.grid
+    );
+    data
+}
+
+/// The groups of an f_oneway point: `x` split by `sizes`.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the group sizes are whole numbers from 2 to 30"
+)]
+fn groups(p: &harness::Point) -> Vec<Vec<f64>> {
+    let mut rest = p.inputs["x"].as_slice();
+    p.inputs["sizes"]
+        .iter()
+        .map(|&size| {
+            let (group, tail) = rest.split_at(size as usize);
+            rest = tail;
+            group.to_vec()
+        })
+        .collect()
 }
 
 /// Evaluates `f` at the point's degrees of freedom and argument `x` (or `p`).
@@ -402,6 +463,42 @@ fn statrs_matches_reference() {
                 NaNPolicy::Error,
             ))
         }),
+        Check {
+            function: "statrs::stats_tests::chisquare::chisquare",
+            dataset: "chisquare",
+            expected: &[Expected {
+                finding: "027-statrs-chisquare",
+                points: expected::CHISQUARE,
+            }],
+        }
+        .run(|p| {
+            statistic_and_pvalue(chisquare(
+                &counts(p),
+                Some(&p.inputs["f_exp"]),
+                Some(ddof(p)),
+            ))
+        }),
+        // The same function with its default, equal expected frequencies.
+        Check {
+            function: "statrs::stats_tests::chisquare::chisquare",
+            dataset: "chisquare",
+            expected: &[Expected {
+                finding: "027-statrs-chisquare",
+                points: expected::CHISQUARE_EQUAL,
+            }],
+        }
+        .run_on(equal_expected(), |p| {
+            statistic_and_pvalue(chisquare(&counts(p), None, Some(ddof(p))))
+        }),
+        Check {
+            function: "statrs::stats_tests::f_oneway::f_oneway",
+            dataset: "f_oneway",
+            expected: &[Expected {
+                finding: "028-statrs-f-oneway",
+                points: expected::F_ONEWAY,
+            }],
+        }
+        .run(|p| statistic_and_pvalue(f_oneway(groups(p), NaNPolicy::Error))),
         // Near the end: it loops forever at 7 points (finding 020); the
         // abandoned threads only share the CPU with `t_ppf`, whose correct
         // points need microseconds.

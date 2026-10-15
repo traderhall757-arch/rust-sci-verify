@@ -407,7 +407,8 @@ _Updated at the end of every session. Start here._
     `Chi::inverse_cdf` uses the same search.
 
 - **Milestone 4, part 14: statrs one-sample t-test** (statrs
-  `stats_tests::ttest_onesample`; PR open):
+  `stats_tests::ttest_onesample`;
+  [PR #27](https://github.com/traderhall757-arch/rust-sci-verify/pull/27), merged):
   - The generator now takes vector inputs (a sample) and several outputs
     (`docs/data-format.md`); every existing data file regenerates
     byte-identical.
@@ -424,6 +425,24 @@ _Updated at the end of every session. Start here._
     at 1.8e-15). Off the grid also up to 2.3e-11 in t when the mean nearly
     equals mu (plain summation). Both confirmed: `sf` and a compensated sum
     leave 0 of 2,589 random samples failing.
+
+- **Milestone 4, part 15: statrs chi-squared test and one-way ANOVA** (statrs
+  `stats_tests::chisquare`, `stats_tests::f_oneway`; PR open):
+  - New datasets `chisquare` (184 points: 2 to 30 categories, equal or
+    sloping expected frequencies, totals 100 to 1e6, ddof 0 and 1) and
+    `f_oneway` (48 points: 2 to 5 groups of 2 to 30 values around 0 and 100,
+    group shifts 0.001 to 30); outputs statistic and p-value; tolerance 5e-12
+    from the same rounding bound as `ttest_1samp` (largest 4.2e-12 in both,
+    tested). Tested against exact rational arithmetic, closed forms,
+    `mpmath.gammainc` / `mpmath.betainc` and, for two groups, the two-sample
+    t-test. SciPy is off at 4 `f_oneway` points.
+  - `chisquare` fails 29 points (14 of the equal-frequency points with
+    `f_exp = None`): **finding 027** (high), approved by Claude after the
+    checklist. The p-value is `1 - cdf`, as in finding 026.
+  - `f_oneway` fails 34 of 48: **finding 028** (high), approved by Claude
+    after the checklist. Textbook one-pass sums of squares lose digits when
+    the values are large compared with their spread (F 1.7e-4 off for two
+    groups of three values near 1e5), plus the `1 - cdf` p-value.
 
 ## Next
 
