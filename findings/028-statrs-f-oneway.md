@@ -50,9 +50,9 @@ output); it gives the "Crate" column below.
 rows is not exactly 0.8.) Second opinion: SciPy (`scipy.stats.f_oneway`)
 agrees with mpmath within 9.5e-16 at every row. On the grid SciPy is off at
 4 points (it subtracts sums of squares too, after removing the overall
-mean): 5.1e-12 in one statistic with F = 1.2e5 and 2.0e-11 to 7.5e-11 in
-p-values below 1e-52; there the p-value is confirmed by `mpmath.betainc`
-(tested).
+mean): 5.1e-12 in one statistic with F = 1.2e5 and 7.4e-12 to 7.5e-11 in
+four p-values below 1e-52; there the p-value is confirmed by
+`mpmath.betainc` (tested).
 
 ## Confirmation checklist
 

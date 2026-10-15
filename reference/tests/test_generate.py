@@ -122,3 +122,13 @@ def test_wrong_number_of_outputs_is_rejected():
         assert "3 outputs" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_openblas_runs_the_same_kernels_on_every_machine():
+    # The package pins OpenBLAS to its Haswell kernels. At this f_oneway point
+    # SciPy's statistic differs in the last bit with the SkylakeX kernels.
+    check_numpy_dispatch()
+    import scipy.stats as st
+
+    r = st.f_oneway([99.5, 100.419], [101.338, 101.257])
+    assert float(r.statistic) == 8.413571732372173

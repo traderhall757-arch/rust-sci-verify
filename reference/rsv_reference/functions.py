@@ -1904,9 +1904,9 @@ F_ONEWAY = Spec(
         "(f_oneway_rounding_bound); the p-value adds kappa_p = |F f(F) / Q|. The largest bound "
         "max(kappa_p, 1) (kappa_F + N) 2^-53 on this grid is 4.2e-12 (three groups of 30 "
         "around 100 with delta 30: F = 3.0e5, kappa_p = 43); 5e-12 as for ttest_1samp "
-        "(tested). SciPy's worst error at the points it gets within tolerance is 1.7e-12; it "
-        "is off at 4: one statistic (5.1e-12, F = 1.2e5) and three p-values below 1e-52 "
-        "(2.0e-11 to 7.5e-11)"
+        "(tested). SciPy's worst error at the points it gets within tolerance is 5.0e-12; it "
+        "is off at 4: one statistic (5.1e-12, F = 1.2e5) and four p-values below 1e-52 "
+        "(7.4e-12 to 7.5e-11)"
     ),
     grid_description=(
         "group sizes (2, 2), (3, 3, 3), (2, 4, 6, 8, 10), (30, 30, 30); value i (counted over "

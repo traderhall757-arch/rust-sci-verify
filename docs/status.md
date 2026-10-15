@@ -443,6 +443,12 @@ _Updated at the end of every session. Start here._
     after the checklist. Textbook one-pass sums of squares lose digits when
     the values are large compared with their spread (F 1.7e-4 off for two
     groups of three values near 1e5), plus the `1 - cdf` p-value.
+  - Reference generator fix found by this PR's CI: OpenBLAS picks its kernels
+    by CPU, so SciPy's `f_oneway` differed in the last bit between a machine
+    with AVX-512 (SkylakeX kernels) and the CI runners (Haswell). The
+    generator now pins `OPENBLAS_CORETYPE=Haswell` before NumPy and SciPy are
+    imported and refuses to run otherwise; regenerating every dataset changes
+    only 15 SciPy values of `f_oneway`.
 
 ## Next
 

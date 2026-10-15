@@ -47,7 +47,12 @@ Every **following line** is one point:
 Grids are built from exact decimal strings or exact binary fractions, never from
 platform `pow()`, and there is no randomness. The SciPy column can differ in
 the last bit between platforms, so CI (`ubuntu-24.04`, pinned Python
-environment from `reference/uv.lock`) is the source of truth.
+environment from `reference/uv.lock`) is the source of truth. Two sources of
+such differences are pinned in `rsv_reference/__init__.py` before NumPy is
+imported: NumPy's AVX-512 loops are switched off, and OpenBLAS (used by SciPy,
+for example in `scipy.stats.f_oneway`) is held to its Haswell (AVX2) kernels,
+the level of the CI runners; the generator refuses to run if either did not
+take effect.
 
 ## Adding a function
 
