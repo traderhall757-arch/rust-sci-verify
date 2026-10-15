@@ -1609,3 +1609,58 @@ def test_polygamma_grids_and_poles():
     assert functions.DIGAMMA.input_tags(-3.0) == [POLE]
     assert (-999999999999999.5,) in digamma
     assert min(trigamma) == (-1000000.5,)
+
+
+def _exact_t_squared(x, mu):
+    # (t^2, mean - mu) with t^2 = n (mean - mu)^2 / s^2 in exact rational
+    # arithmetic (the doubles are exact binary fractions), a route that shares
+    # no code with mpmath's.
+    from fractions import Fraction
+
+    xs = [Fraction(v) for v in x]
+    n = len(xs)
+    mean = sum(xs) / n
+    var = sum((v - mean) ** 2 for v in xs) / (n - 1)
+    diff = mean - Fraction(mu)
+    return n * diff**2 / var, diff
+
+
+@pytest.mark.parametrize("point", functions._ttest_grid()[::7])
+def test_ttest_statistic_matches_exact_rational_arithmetic(point):
+    x, mu, alt = point
+    t2, diff = _exact_t_squared(x, mu)
+    with mpmath.workdps(50):
+        t, _ = functions._mp_ttest_1samp(mp(*x), mpmath.mpf(mu), mpmath.mpf(alt))
+        exact = mpmath.mpf(t2.numerator) / t2.denominator
+        assert close(t * t, exact)
+        assert (t > 0) == (diff > 0)
+
+
+@pytest.mark.parametrize("point", [p for p in functions._ttest_grid() if len(p[0]) in (2, 3)])
+def test_ttest_pvalue_matches_closed_forms_for_df_one_and_two(point):
+    # df = 1: sf(t) = 1/2 - atan(t) / pi; df = 2: sf(t) = 1/2 - t / (2 sqrt(t^2 + 2)),
+    # written as 1 / (sqrt(t^2 + 2) (sqrt(t^2 + 2) + t)) to keep tiny tails exact.
+    x, mu, alt = point
+    with mpmath.workdps(50):
+        t, p = functions._mp_ttest_1samp(mp(*x), mpmath.mpf(mu), mpmath.mpf(alt))
+
+        def sf(u):
+            if len(x) == 2:
+                return (
+                    mpmath.atan(1 / u) / mpmath.pi if u > 0 else 1 - mpmath.atan(-1 / u) / mpmath.pi
+                )
+            r = mpmath.sqrt(u * u + 2)
+            return 1 / (r * (r + u)) if u > 0 else 1 - 1 / (r * (r - u))
+
+        expected = {0.0: 2 * sf(abs(t)), 1.0: sf(t), -1.0: sf(-t)}[alt]
+        assert close(p, expected, digits=35)
+
+
+def test_ttest_rounding_bound_matches_the_tolerance_reason():
+    with mpmath.workdps(30):
+        worst, point = max((functions.ttest_rounding_bound(*p), p) for p in functions._ttest_grid())
+        kappa_t, _ = functions.ttest_condition(*point)
+        assert 4.4e-12 < worst <= functions.TTEST_1SAMP.tolerance
+        assert (len(point[0]), point[1]) == (100, 9.99)
+        assert 3.9e4 < kappa_t < 4.1e4
+        assert max(functions.ttest_condition(*p)[1] for p in functions._ttest_grid()) < 99.1

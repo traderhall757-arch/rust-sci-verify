@@ -33,7 +33,6 @@ def check_numpy_dispatch() -> None:
 
 
 SCHEMA = 1
-OUTPUT = "y"  # scalar functions have a single output named "y"
 
 
 @dataclass(frozen=True)
@@ -45,24 +44,48 @@ class Summary:
     tags: dict[str, int]
 
 
-def mpmath_value(spec: Spec, args: tuple[float, ...]) -> tuple[float, bool]:
+Arg = float | tuple[float, ...]
+
+
+def _mp_arg(a: Arg) -> mpmath.mpf | list[mpmath.mpf]:
+    return [mpmath.mpf(v) for v in a] if isinstance(a, tuple) else mpmath.mpf(a)
+
+
+def _outputs(spec: Spec, value) -> tuple:
+    """The function's value as a tuple with one entry per output."""
+    if len(spec.outputs) == 1:
+        return (value,)
+    value = tuple(value)
+    if len(value) != len(spec.outputs):
+        raise ValueError(f"{spec.name}: {len(value)} outputs, expected {len(spec.outputs)}")
+    return value
+
+
+def _same(a: float, b: float) -> bool:
+    return a == b or (math.isnan(a) and math.isnan(b))
+
+
+def mpmath_value(spec: Spec, args: tuple[Arg, ...]) -> tuple[tuple[float, ...], bool]:
     """Evaluate at every precision in PRECISIONS (inputs are exact doubles).
 
-    Returns the correctly rounded double and whether all precisions agree.
+    Returns the correctly rounded doubles (one per output) and whether all
+    precisions agree on every output.
     """
     values = []
     for dps in PRECISIONS:
         with mpmath.workdps(dps):
-            values.append(to_f64(spec.mpmath_fn(*[mpmath.mpf(a) for a in args])))
+            out = _outputs(spec, spec.mpmath_fn(*[_mp_arg(a) for a in args]))
+            values.append(tuple(to_f64(v) for v in out))
     first = values[0]
-    stable = all(v == first or (math.isnan(v) and math.isnan(first)) for v in values)
+    stable = all(_same(a, b) for v in values for a, b in zip(v, first, strict=True))
     return first, stable
 
 
-def scipy_value(spec: Spec, args: tuple[float, ...]) -> float:
+def scipy_value(spec: Spec, args: tuple[Arg, ...]) -> tuple[float, ...]:
     with np.errstate(all="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return float(spec.scipy_fn(*args))
+        sci_args = [list(a) if isinstance(a, tuple) else a for a in args]
+        return tuple(float(v) for v in _outputs(spec, spec.scipy_fn(*sci_args)))
 
 
 def header(spec: Spec, count: int) -> dict:
@@ -72,7 +95,7 @@ def header(spec: Spec, count: int) -> dict:
         "function": spec.name,
         "description": spec.description,
         "inputs": list(spec.inputs),
-        "outputs": [OUTPUT],
+        "outputs": list(spec.outputs),
         "points": count,
         "tolerance": {"rel": spec.tolerance, "reason": spec.tolerance_reason},
         "grid": spec.grid_description,
@@ -83,22 +106,27 @@ def header(spec: Spec, count: int) -> dict:
     }
 
 
-def record(spec: Spec, args: tuple[float, ...]) -> dict:
+def _json_list(a: Arg) -> list:
+    return [json_number(v) for v in a] if isinstance(a, tuple) else [json_number(a)]
+
+
+def record(spec: Spec, args: tuple[Arg, ...]) -> dict:
     tags = list(spec.input_tags(*args))
     if POLE in tags:
-        exact = math.nan
+        exact = tuple(math.nan for _ in spec.outputs)
     else:
         exact, stable = mpmath_value(spec, args)
         if not stable:
             tags.append(UNSTABLE)
-        if math.isinf(exact):
+        if any(math.isinf(v) for v in exact):
             tags.append(OVERFLOW)
-    if math.isnan(exact) and not tags:
+    if any(math.isnan(v) for v in exact) and not tags:
         raise ValueError(f"{spec.name}{args}: mpmath gave NaN at an untagged point")
+    scipy_out = scipy_value(spec, args)
     rec = {
-        "in": {name: [json_number(a)] for name, a in zip(spec.inputs, args, strict=True)},
-        "mpmath": {OUTPUT: [json_number(exact)]},
-        "scipy": {OUTPUT: [json_number(scipy_value(spec, args))]},
+        "in": {name: _json_list(a) for name, a in zip(spec.inputs, args, strict=True)},
+        "mpmath": {o: [json_number(v)] for o, v in zip(spec.outputs, exact, strict=True)},
+        "scipy": {o: [json_number(v)] for o, v in zip(spec.outputs, scipy_out, strict=True)},
     }
     if tags:
         rec["tags"] = sorted(tags)

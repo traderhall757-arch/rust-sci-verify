@@ -8,6 +8,8 @@ use statrs::distribution::{
     StudentsT,
 };
 use statrs::function::{erf, gamma};
+use statrs::stats_tests::ttest_onesample::ttest_onesample;
+use statrs::stats_tests::{Alternative, NaNPolicy};
 
 /// The standard normal distribution (the reference data has mean 0, sd 1).
 fn standard_normal() -> Normal {
@@ -88,6 +90,25 @@ fn beta_dist(a: f64, b: f64) -> Beta {
 /// The F distribution with `d1` and `d2` degrees of freedom.
 fn fisher_snedecor(d1: f64, d2: f64) -> FisherSnedecor {
     FisherSnedecor::new(d1, d2).expect("valid parameters")
+}
+
+/// The alternative hypothesis coded as in the reference data: -1 less,
+/// 0 two-sided, 1 greater.
+fn alternative(code: f64) -> Alternative {
+    match code {
+        -1.0 => Alternative::Less,
+        0.0 => Alternative::TwoSided,
+        1.0 => Alternative::Greater,
+        _ => panic!("alternative code {code}"),
+    }
+}
+
+/// Turns a test's `(statistic, p-value)` result into the two outputs.
+fn statistic_and_pvalue<E: std::fmt::Debug>(r: Result<(f64, f64), E>) -> Outcome {
+    match r {
+        Ok((statistic, pvalue)) => Outcome::Value(vec![vec![statistic], vec![pvalue]]),
+        Err(e) => Outcome::Error(format!("{e:?}")),
+    }
 }
 
 /// Evaluates `f` at the point's degrees of freedom and argument `x` (or `p`).
@@ -365,6 +386,22 @@ fn statrs_matches_reference() {
             }],
         }
         .run(|p| f_dist(p, "x", FisherSnedecor::sf)),
+        Check {
+            function: "statrs::stats_tests::ttest_onesample::ttest_onesample",
+            dataset: "ttest_1samp",
+            expected: &[Expected {
+                finding: "026-statrs-ttest-onesample",
+                points: expected::TTEST_1SAMP,
+            }],
+        }
+        .run(|p| {
+            statistic_and_pvalue(ttest_onesample(
+                p.inputs["x"].clone(),
+                p.scalar("mu"),
+                alternative(p.scalar("alternative")),
+                NaNPolicy::Error,
+            ))
+        }),
         // Near the end: it loops forever at 7 points (finding 020); the
         // abandoned threads only share the CPU with `t_ppf`, whose correct
         // points need microseconds.

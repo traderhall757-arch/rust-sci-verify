@@ -1593,6 +1593,126 @@ EXPON_PPF = Spec(
     input_tags=_expon_ppf_tags,
 )
 
+# --- hypothesis tests: one-sample t-test --------------------------------------
+
+# Deterministic samples x_i = loc + z_i with z_i = ((7919 i) mod 1000 - 500) / 1000
+# (a fixed scrambled pattern of exact decimals, sd about 0.29; no randomness),
+# and the hypothesised mean mu = loc + d, so the statistic t is about
+# -d sqrt(n) / 0.29: from 0.003 to 3400 in size.
+_TTEST_N = (2, 3, 5, 10, 30, 100)
+_TTEST_LOC = (0.0, 10.0)
+_TTEST_D = (-30.0, -3.0, -0.3, -0.01, 0.001, 0.1, 1.0, 10.0, 100.0)
+# The alternative hypothesis, coded as a number: -1 less, 0 two-sided, 1 greater.
+_TTEST_ALTERNATIVES = {-1.0: "less", 0.0: "two-sided", 1.0: "greater"}
+
+
+def _ttest_sample(n: int, loc: float) -> tuple[float, ...]:
+    return tuple(loc + ((7919 * i) % 1000 - 500) / 1000 for i in range(n))
+
+
+def _mp_ttest_parts(x: list[mpmath.mpf], mu: mpmath.mpf):
+    """The exact mean, variance (n - 1 denominator) and statistic t."""
+    n = len(x)
+    with mpmath.extraprec(60):
+        mean = mpmath.fsum(x) / n
+        var = mpmath.fsum((v - mean) ** 2 for v in x) / (n - 1)
+        t = (mean - mu) / mpmath.sqrt(var / n)
+    return mean, var, t
+
+
+def ttest_condition(x: tuple[float, ...], mu: float, alternative: float) -> tuple:
+    """(kappa_t, kappa_p): the relative condition numbers of the statistic and of
+    the p-value as a function of t.
+
+    kappa_t bounds |dt / t| per relative perturbation eps of every x_i and mu:
+    (mean |x_i| + |mu|) / |mean - mu| from the numerator and
+    sum |x_i - mean| |x_i| / ((n - 1) s^2) from the standard deviation.
+    kappa_p = |t f(t) / P| with P the p-value's tail (both tails at |t| for the
+    two-sided test, whose p-value is 2 sf(|t|)).
+    """
+    xs = [mpmath.mpf(v) for v in x]
+    mu_m = mpmath.mpf(mu)
+    n = len(xs)
+    mean, var, t = _mp_ttest_parts(xs, mu_m)
+    kappa_t = (mpmath.fsum(abs(v) for v in xs) / n + abs(mu_m)) / abs(mean - mu_m)
+    kappa_t += mpmath.fsum(abs(v - mean) * abs(v) for v in xs) / ((n - 1) * var)
+    df = mpmath.mpf(n - 1)
+    if alternative == 0:
+        tail = _mp_t_sf(df, abs(t))
+    elif alternative > 0:
+        tail = _mp_t_sf(df, t)
+    else:
+        tail = _mp_t_cdf(df, t)
+    kappa_p = abs(t * _mp_t_pdf(df, t) / tail)
+    return kappa_t, kappa_p
+
+
+def ttest_rounding_bound(x: tuple[float, ...], mu: float, alternative: float) -> float:
+    """What a careful double-precision method may lose in the p-value: the statistic
+    from sums of n rounded terms is off by up to about (kappa_t + n) 2^-53
+    relative, and the p-value by kappa_p times that."""
+    kappa_t, kappa_p = ttest_condition(x, mu, alternative)
+    return float(max(kappa_p, 1) * (kappa_t + len(x)) * mpmath.mpf(2) ** -53)
+
+
+def _ttest_grid() -> list[tuple[tuple[float, ...], float, float]]:
+    points = []
+    for n in _TTEST_N:
+        for loc in _TTEST_LOC:
+            x = _ttest_sample(n, loc)
+            for d in _TTEST_D:
+                points.extend((x, loc + d, alt) for alt in _TTEST_ALTERNATIVES)
+    return points
+
+
+def _mp_ttest_1samp(x: list[mpmath.mpf], mu: mpmath.mpf, alternative: mpmath.mpf):
+    """(t, p) for the one-sample t-test with n - 1 degrees of freedom."""
+    _, _, t = _mp_ttest_parts(x, mu)
+    df = mpmath.mpf(len(x) - 1)
+    if alternative == 0:
+        p = 2 * _mp_t_sf(df, abs(t))
+    elif alternative > 0:
+        p = _mp_t_sf(df, t)
+    else:
+        p = _mp_t_cdf(df, t)
+    return t, p
+
+
+def _sc_ttest_1samp(x: list[float], mu: float, alternative: float) -> tuple[float, float]:
+    r = st.ttest_1samp(x, mu, alternative=_TTEST_ALTERNATIVES[alternative])
+    return float(r.statistic), float(r.pvalue)
+
+
+TTEST_1SAMP = Spec(
+    name="ttest_1samp",
+    description=(
+        "One-sample t-test: statistic t = (mean - mu) / (s / sqrt(n)) and its p-value from "
+        "Student's t with n - 1 degrees of freedom; alternative -1 less, 0 two-sided, 1 greater"
+    ),
+    inputs=("x", "mu", "alternative"),
+    outputs=("statistic", "pvalue"),
+    tolerance=5e-12,
+    tolerance_reason=(
+        "For both outputs. The inputs are exact, but t is formed from sums of n rounded terms, "
+        "so a careful method is off by up to about (kappa_t + n) 2^-53, kappa_t being t's "
+        "relative condition number in the data and mu (ttest_condition); the p-value adds the "
+        "factor kappa_p = |t f(t) / P| (at most 99 here). The largest bound "
+        "max(kappa_p, 1) (kappa_t + n) 2^-53 on this grid is 4.5e-12 (n = 100, loc = 10, "
+        "mu = 9.99, where t = 0.017 and kappa_t = 4.0e4: mean - mu cancels); 5e-12 is the "
+        "smallest round value above it (tested). SciPy's worst error is 1.7e-12, at that point"
+    ),
+    grid_description=(
+        "samples x_i = loc + ((7919 i) mod 1000 - 500) / 1000, i = 0..n-1, for n in {2, 3, 5, "
+        "10, 30, 100} and loc in {0, 10}; mu = loc + d for d in {-30, -3, -0.3, -0.01, 0.001, "
+        "0.1, 1, 10, 100}; each with alternative -1 (less), 0 (two-sided) and 1 (greater). |t| "
+        "runs from 0.017 to 3410 and the p-value from 4.3e-253 to 1"
+    ),
+    grid=_ttest_grid,
+    mpmath_fn=_mp_ttest_1samp,
+    scipy_name="scipy.stats.ttest_1samp",
+    scipy_fn=_sc_ttest_1samp,
+)
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -2261,7 +2381,7 @@ ALL: tuple[Spec, ...] = (
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
     INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
-    BETAINCINV, BETA_CDF, BETA_SF,
+    BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip

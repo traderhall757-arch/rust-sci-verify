@@ -84,3 +84,41 @@ def test_numpy_runs_the_same_simd_code_on_every_machine():
 
     # A point where NumPy's AVX-512 exp and the C library's differ in the last bit.
     assert float(np.exp(np.float64(-9.5))) == math.exp(-9.5)
+
+
+def test_vector_inputs_and_several_outputs():
+    # A sample (a tuple in the grid) is written as a list and reaches mpmath as
+    # a list of mpf and SciPy as a list of floats; each output gets its own key.
+    spec = _spec(
+        inputs=("x", "c"),
+        outputs=("total", "count"),
+        grid=lambda: [((0.5, 0.25, 1e300), 2.0)],
+        mpmath_fn=lambda x, c: (mpmath.fsum(x) * c, mpmath.mpf(len(x))),
+        scipy_fn=lambda x, c: (sum(x) * c, float(len(x))),
+    )
+    rec = record(spec, ((0.5, 0.25, 1e300), 2.0))
+    assert rec["in"] == {"x": [0.5, 0.25, 1e300], "c": [2.0]}
+    assert rec["mpmath"] == {"total": [2e300], "count": [3.0]}
+    assert rec["scipy"] == {"total": [2e300], "count": [3.0]}
+    assert "tags" not in rec
+
+
+def test_any_infinite_output_is_tagged_overflow():
+    spec = _spec(
+        outputs=("a", "b"),
+        mpmath_fn=lambda x: (mpmath.exp(x), x),
+        scipy_fn=lambda x: (math.inf, x),
+    )
+    rec = record(spec, (1000.0,))
+    assert rec["tags"] == [OVERFLOW]
+    assert rec["mpmath"] == {"a": ["inf"], "b": [1000.0]}
+
+
+def test_wrong_number_of_outputs_is_rejected():
+    spec = _spec(outputs=("a", "b"), mpmath_fn=lambda x: (x, x, x))
+    try:
+        record(spec, (1.0,))
+    except ValueError as e:
+        assert "3 outputs" in str(e)
+    else:
+        raise AssertionError("expected ValueError")

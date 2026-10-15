@@ -15,7 +15,13 @@ PRECISIONS = (50, 100)  # decimal digits; both must round to the same double
 
 @dataclass(frozen=True)
 class Spec:
-    """A scalar function y = f(inputs) with its references and test grid."""
+    """A function y = f(inputs) with its references and test grid.
+
+    Inputs are scalars, or vectors (a grid tuple's element is then a tuple of
+    floats, e.g. a sample for a hypothesis test). With one output (the
+    default "y") mpmath_fn and scipy_fn return a number; with several they
+    return a tuple, in the order of `outputs`.
+    """
 
     name: str
     description: str
@@ -30,3 +36,4 @@ class Spec:
     # Input-based tag rules, e.g. "x is a non-positive integer" -> POLE.
     # Points tagged POLE are not evaluated with mpmath.
     input_tags: Callable[..., list[str]] = field(default=lambda *args: [])
+    outputs: tuple[str, ...] = ("y",)
