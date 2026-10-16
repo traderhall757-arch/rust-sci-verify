@@ -16,7 +16,9 @@
 `gamma_lr`'s other failures (1 subnormal result on `gammainc` and 14 points
 with a >= 1e8 on `gammainc_large`) are finding 012's; the distributions
 (`Gamma`, `ChiSquared`, `Erlang`) test x = 0 themselves before calling these
-functions, so they are not affected.
+functions, so they are not affected. `Chi` tests x = 0 but then passes
+`x * x / 2`, which is 0 for x below 2.72e-162 and +inf from 1.34e154, so it
+panics there ([finding 035](035-statrs-chi-cdf.md), added 2026-10-16).
 
 ## Reproduction
 

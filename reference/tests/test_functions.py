@@ -900,6 +900,151 @@ def test_invgamma_ppf_log_magnitude_matches_the_tolerance_reason():
     assert functions.INVGAMMA_PPF.tolerance >= 2 * worst * 2.0**-53
 
 
+@pytest.mark.parametrize("x", [5e-324, 1e-170, 4e-162, 1e-160, 1e-3, 0.5, 1.0, 3.0, 38.0, 1e4])
+def test_chi_cdf_and_sf_match_closed_forms_for_k_one_two_three(x):
+    # k = 1: F = erf(x / sqrt 2); k = 2: 1 - F = e^(-x^2/2); k = 3:
+    # 1 - F = erfc(x / sqrt 2) + sqrt(2 / pi) x e^(-x^2/2) (DLMF 8.4.6 and 8.4.10),
+    # computed from x itself, so also where x * x is subnormal or 0 in a double
+    # (mpmath.erfc overflows internally above about 1e154: see the ends test).
+    with mpmath.workdps(50):
+        (x,) = mp(x)
+        one, two, three = mp(1, 2, 3)
+        s2 = mpmath.sqrt(2)
+        e = mpmath.exp(-x * x / 2)
+        assert close(functions._mp_chi_cdf(one, x), mpmath.erf(x / s2))
+        assert close(functions._mp_chi_sf(one, x), mpmath.erfc(x / s2))
+        assert close(functions._mp_chi_cdf(two, x), -mpmath.expm1(-x * x / 2))
+        assert close(functions._mp_chi_sf(two, x), e)
+        sf3 = mpmath.erfc(x / s2) + mpmath.sqrt(2 / mpmath.pi) * x * e
+        assert close(functions._mp_chi_sf(three, x), sf3)
+        assert close(functions._mp_chi_cdf(three, x) + sf3, 1)
+
+
+@pytest.mark.parametrize(
+    ("k", "x"),
+    [(1.0, 1e-160), (5.0, 2.0), (100.0, 0.00447213595499958), (161.0, 44.721359549995796),
+     (1e3, 20.0), (1e3, 37.416573867739416)],
+)  # fmt: skip
+def test_chi_cdf_and_sf_match_mpmath_gammainc_at_half_the_square(k, x):
+    # F(x) = P(k/2, x^2/2) by mpmath.gammainc (a different method from the series
+    # and continued fraction behind the datasets), with x^2/2 formed exactly.
+    with mpmath.workdps(50):
+        k, x = mp(k, x)
+        t = x * x / 2  # exact: x has 53 bits and the precision is 169
+        assert close(functions._mp_chi_cdf(k, x), mpmath.gammainc(k / 2, 0, t, regularized=True))
+        assert close(
+            functions._mp_chi_sf(k, x), mpmath.gammainc(k / 2, t, mpmath.inf, regularized=True)
+        )
+
+
+@pytest.mark.parametrize("x", [75.87726479572596, 119.34253511267173])
+def test_chi_cdf_and_sf_match_the_finite_sum_at_k_ten_thousand(x):
+    # Where SciPy is 1.3e-12 (cdf) and 5.1e-12 (sf) off: Q(a, t) = e^-t
+    # sum_{j<a} t^j / j! (DLMF 8.4.10) for the integer a = k/2 = 5000, with
+    # 60 digits more than P = 1 - Q's magnitude needs.
+    xm = mpmath.mpf(x)
+    with mpmath.workdps(400):
+        t = xm * xm / 2
+        term = total = mpmath.mpf(1)
+        for j in range(1, 5000):
+            term *= t / j
+            total += term
+        q = mpmath.exp(-t) * total
+        p = 1 - q
+    with mpmath.workdps(50):
+        assert close(functions._mp_chi_sf(mpmath.mpf(1e4), xm), q)
+        assert close(functions._mp_chi_cdf(mpmath.mpf(1e4), xm), p)
+
+
+def test_chi_cdf_and_sf_cover_the_ends():
+    with mpmath.workdps(50):
+        for k in mp(1, 161, 1e4):
+            assert functions._mp_chi_cdf(k, mpmath.mpf(0)) == 0
+            assert functions._mp_chi_sf(k, mpmath.mpf(0)) == 1
+            # Where x * x overflows a double, the cdf still rounds to 1 and the sf to 0.
+            for x in mp(1e155, 1e300):
+                assert 1 - functions._mp_chi_cdf(k, x) < mpmath.mpf(2) ** -54
+                assert functions._mp_chi_sf(k, x) < mpmath.mpf(2) ** -1075
+
+
+@pytest.mark.parametrize(
+    ("k", "p"),
+    [(1.0, 5e-324), (1.0, 1e-300), (2.0, 5e-324), (10.0, 5e-324), (300.0, 5e-324),
+     (1e4, 5e-324), (3.0, 0.5), (161.0, 0.999), (1.0, 1 - 1e-15), (1e4, 1 - 1e-15)],
+)  # fmt: skip
+def test_chi_ppf_inverts_the_cdf(k, p):
+    # F(ppf(p)) = p, or 1 - F(ppf(p)) = 1 - p in the upper half (1 - p exact),
+    # with F by mpmath.gammainc at x^2/2; includes every kind of point where
+    # SciPy or statrs is off.
+    with mpmath.workdps(50):
+        k, p = mp(k, p)
+        x = functions._mp_chi_ppf(k, p)
+        t = x * x / 2
+        if p <= 0.5:
+            assert close(mpmath.gammainc(k / 2, 0, t, regularized=True), p, 35)
+        else:
+            assert close(mpmath.gammainc(k / 2, t, mpmath.inf, regularized=True), 1 - p, 35)
+
+
+@pytest.mark.parametrize("p", [5e-324, 1e-300, 1e-158, 1e-10, 0.25, 0.5, 0.75, 1 - 1e-15])
+def test_chi_ppf_matches_closed_forms_for_k_one_and_two(p):
+    # k = 1: x = sqrt(2) erfinv(p); k = 2: x = sqrt(-2 log(1 - p)).
+    with mpmath.workdps(60):
+        (p,) = mp(p)
+        one, two = mp(1, 2)
+        assert close(functions._mp_chi_ppf(one, p), mpmath.sqrt(2) * mpmath.erfinv(p))
+        assert close(functions._mp_chi_ppf(two, p), mpmath.sqrt(-2 * mpmath.log1p(-p)))
+    assert functions._mp_chi_ppf(mpmath.mpf(3), mpmath.mpf(0)) == 0
+
+
+@pytest.mark.parametrize(
+    ("spec", "condition", "gamma_condition"),
+    [
+        (functions.CHI_CDF, functions.chi_cdf_condition, functions.gamma_cdf_condition),
+        (functions.CHI_SF, functions.chi_sf_condition, functions.gamma_sf_condition),
+    ],
+)
+def test_chi_condition_numbers_match_the_tolerance_reason(spec, condition, gamma_condition):
+    # Rounding x * x costs gamma's condition number at t = x^2/2 (half the chi
+    # condition number) times 2^-53: at most 2.1e3 at k = 1e4, near
+    # t = a -+ 30 sqrt(a), so 2.4e-13, inside the tolerance; at k = 2e6
+    # (gamma's a = 1e6) it would cost 3.3e-12, beyond it.
+    with mpmath.workdps(30):
+        assert close(condition(5.0, 2.0), 2 * gamma_condition(2.5, 2.0), 25)
+        worst, k = max(
+            (condition(k, x) / 2, k)
+            for k, x in spec.grid()
+            if 0 < x < 1e154
+            and spec.mpmath_fn(mpmath.mpf(k), mpmath.mpf(x)) >= mpmath.mpf(2) ** -1022
+        )
+        assert k == 1e4
+        assert 2.12e3 < worst < 2.13e3
+        assert worst * 2.0**-53 < 2.4e-13 < spec.tolerance
+        a = 1e6
+        k30 = max(
+            gamma_condition(a, a + 30 * math.sqrt(a)), gamma_condition(a, a - 30 * math.sqrt(a))
+        )
+        assert 3.3e-12 < k30 * 2.0**-53 < 3.4e-12
+
+
+def test_chi_ppf_log_magnitude_matches_the_tolerance_reason():
+    # The largest |log(x / sqrt 2)| at a nonzero, normal quantile of the committed
+    # data (k = 1, p = 1e-300, x = 1.25e-300), against the 2 |L / 2| 2^-53 bound.
+    data = Path(__file__).resolve().parent.parent / "data" / "chi_ppf.jsonl"
+    rows = [json.loads(line) for line in data.read_text().splitlines()[1:]]
+    logs = [
+        (abs(math.log(y / math.sqrt(2))), r["in"]["k"][0], r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags")
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= y < math.inf
+    ]
+    worst, k, p = max(logs)
+    assert (k, p) == (1.0, 1e-300)
+    assert 690.8 < worst < 691.0
+    assert functions.CHI_PPF.tolerance >= 2 * worst * 2.0**-53
+
+
 @pytest.mark.parametrize("x", [5e-324, 1e-300, 1e-16, 1e-5, 0.5, 1.0, 37.5, 708.5, 745.0])
 def test_expon_cdf_and_sf_match_the_gamma_routes_and_the_series(x):
     # The exponential distribution is the gamma distribution with shape 1:

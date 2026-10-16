@@ -518,7 +518,7 @@ _Updated at the end of every session. Start here._
 - **Milestone 4, part 20: puruspe gamma, gammq, and gammp on the
   distribution data** (follow-up; `puruspe::gamma` on `gamma`,
   `puruspe::gammq` on `gamma_sf`, `puruspe::gammp` on `gamma_cdf`;
-  [PR #33](https://github.com/traderhall757-arch/rust-sci-verify/pull/33), open):
+  [PR #33](https://github.com/traderhall757-arch/rust-sci-verify/pull/33), merged):
   - `gamma` (the Fukushima port) passes all 901 points (worst 1.5e-15).
   - `gammq` fails 223 of 538. **Finding 034** (high), approved by Claude after
     the checklist, covers 180: it returns 0 for every x > a + 20 (sqrt(a) + 1)
@@ -536,18 +536,46 @@ _Updated at the end of every session. Start here._
     without the `log_result < -700` shortcut leaves only the quadrature
     region failing on `gammainc`, `gamma_cdf` and `gamma_sf`.
 
+- **Milestone 4, part 21: statrs Chi distribution** (statrs `Chi::cdf`,
+  `sf`, `inverse_cdf`;
+  [PR #35](https://github.com/traderhall757-arch/rust-sci-verify/pull/35), open):
+  - New datasets `chi_cdf` and `chi_sf` (514 points each: 13 degrees of
+    freedom k from 1 to 1e4, including 160 and 161 around statrs's switch of
+    density formula, x x = sqrt(2 t) for the gamma_cdf grid's t at shape
+    k/2, plus x where x * x / 2 underflows or x * x overflows; tolerance
+    1e-12, gamma's, since F(x) = P(k/2, x^2/2); rounding x * x costs at most
+    2.4e-13, tested) and `chi_ppf` (351 points: the gamma_ppf probabilities;
+    p = 1 tagged `pole`; 2e-13 from the largest |log(x / sqrt 2)| 690.9,
+    tested). The reference reuses the gamma routes at x^2/2 (60 extra bits)
+    and the gamma quantile; tested against `mpmath.gammainc`, closed forms
+    for k = 1, 2 and 3, and the finite sum at k = 1e4. SciPy fails 5 cdf, 4
+    sf and 4 ppf points.
+  - `cdf` and `sf` **panic** wherever `x * x / 2` rounds to 0 (x below
+    2.72e-162) or `x * x` overflows (from 1.34e154), at every k (52 points
+    each), and for k = 1 `cdf` is 0 for x up to 7.2e-162 (`gamma_lr` treats
+    the five smallest subnormals as 0) and up to 3.7e-4 off up to about
+    x = 2e-156 (a subnormal square): **finding 035** (high), approved by
+    Claude after the checklist. Their other 6 and 7 failures (k = 1e4, worst
+    8.6e-12, and flushed subnormals) are finding 012's, now naming `Chi`.
+  - `inverse_cdf` fails 14 of 351: **finding 036** (high), approved by
+    Claude after the checklist. For k = 1 every p below about 6e-162 gives
+    6.67e-162 or 7.20e-162 (`inverse_cdf(1e-300)` instead of 1.25e-300),
+    because the cdf is 0 there; at p = 5e-324 every k is wrong (a factor of
+    3e7 at k = 2, 10% at k = 300), because the cdf flushes values below
+    1e-308 to 0 (finding 012) and then finding 025's cause 3. Unlike
+    `InverseGamma`, no density overflow and no bracket miss (5,000 + 3,000
+    point off-grid scan, seed 20261016). Confirmed with a bit-exact copy of
+    the search.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 20, puruspe
-   `gamma`, `gammq` and `gammp` on the distribution data, finding 034 and
-   the extension of finding 002).
+1. **Owner: review and merge the open PR** (Milestone 4 part 21, statrs
+   `Chi`, findings 035 and 036).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **`Chi::inverse_cdf`**: it uses `newton_raphson_quantile` like
-     `InverseGamma` (finding 025: density overflow, bracket from `cdf`);
-     check it, then `Weibull`, `LogNormal`, `Pareto`, `Gumbel`, `Laplace`,
-     `Cauchy`, `Levy` (closed forms: look for finding 023's `1 - exp(..)`).
-     Each needs small new datasets; suggested next, as it needs no exact
-     discrete distributions.
+   - **Closed-form statrs distributions:** `Weibull`, `LogNormal`,
+     `Pareto`, `Gumbel`, `Laplace`, `Cauchy`, `Levy` (look for finding
+     023's `1 - exp(..)`). Each needs small new datasets; suggested next, as
+     it needs no exact discrete distributions.
    - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and
      asymptotic), `ks_onesample` / two-sample (exact distributions),
      `fishers_exact` (hypergeometric sums), `anderson_darling` (its p-value
@@ -571,7 +599,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 034 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 036 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -615,7 +643,8 @@ _Updated at the end of every session. Start here._
   `gammainc_large` about 1.5 minutes, `gammaln` and `gammasgn` about 2 s,
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
-  about 6 minutes; the three `expon` datasets about 3 s;
+  about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
+  15 s and `chi_cdf` + `chi_sf` about 1 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).

@@ -1466,6 +1466,158 @@ INVGAMMA_PPF = Spec(
     input_tags=_gamma_ppf_tags,
 )
 
+# --- chi distribution (k degrees of freedom) -----------------------------------
+
+# X is chi with k degrees of freedom exactly when X^2 / 2 is gamma with shape
+# k/2 and rate 1, so F(x) = P(k/2, x^2/2), 1 - F(x) = Q(k/2, x^2/2) and the
+# quantile is sqrt(2 t) with t the gamma quantile. k is an integer (statrs
+# takes a u64). 160 and 161 straddle statrs's switch from the direct density
+# to exp(ln_pdf); k stops at 1e4 (shape 5e3): see the tolerance reason.
+_CHI_K = (1.0, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0, 160.0, 161.0, 300.0, 1e3, 1e4)
+# x where x * x / 2 underflows to 0 (5e-324, 1e-170), to one of the five
+# smallest subnormals (4e-162: 1e-323) or to a subnormal (1e-160), or where
+# x * x overflows (1e155, 1e300).
+_CHI_X_EXTRA = (0.0, 5e-324, 1e-170, 4e-162, 1e-160, 1e155, 1e300)
+
+
+def _chi_x_grid() -> list[tuple[float, float]]:
+    # x = sqrt(2 t) (rounded to a double) for the gamma_cdf grid's t at shape
+    # k/2, so that x^2/2 visits the same places, plus the extra x.
+    points = set()
+    for k in _CHI_K:
+        a = k / 2
+        ts = [t for t in _GAMMA_X if t > 0]
+        ts += [t for j in _GAMMA_K if (t := a + j * math.sqrt(a)) > 0]
+        points.update((k, math.sqrt(2 * t)) for t in ts)
+        points.update((k, x) for x in _CHI_X_EXTRA)
+    return sorted(points)
+
+
+def _mp_half_square(x: mpmath.mpf) -> mpmath.mpf:
+    # x^2 / 2 with 60 extra bits, so rounding it costs nothing at the working precision.
+    with mpmath.extraprec(60):
+        return x * x / 2
+
+
+def _mp_chi_cdf(k: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = P(k/2, x^2/2), 0 for x <= 0."""
+    return _mp_gamma_cdf(k / 2, _mp_half_square(x)) if x > 0 else mpmath.mpf(0)
+
+
+def _mp_chi_sf(k: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """1 - F(x) = Q(k/2, x^2/2), 1 for x <= 0."""
+    return _mp_gamma_sf(k / 2, _mp_half_square(x)) if x > 0 else mpmath.mpf(1)
+
+
+def chi_cdf_condition(k: float, x: float) -> mpmath.mpf:
+    """|x f(x) / F(x)| = 2 gamma_cdf_condition(k/2, x^2/2): F(x) = P(k/2, t) with
+    t = x^2/2, and d log t / d log x = 2."""
+    return 2 * gamma_cdf_condition(k / 2, _mp_half_square(mpmath.mpf(x)))
+
+
+def chi_sf_condition(k: float, x: float) -> mpmath.mpf:
+    """|x f(x) / (1 - F(x))| = 2 gamma_sf_condition(k/2, x^2/2)."""
+    return 2 * gamma_sf_condition(k / 2, _mp_half_square(mpmath.mpf(x)))
+
+
+def _chi_ppf_grid() -> list[tuple[float, float]]:
+    ps = sorted({p for _, p in _gamma_ppf_grid()})
+    return [(k, p) for k in _CHI_K for p in ps]
+
+
+def _mp_chi_ppf(k: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """The x with P(k/2, x^2/2) = p (0 <= p < 1): sqrt(2 t), t the gamma quantile."""
+    t = _mp_gamma_ppf(k / 2, p)
+    with mpmath.extraprec(60):
+        return mpmath.sqrt(2 * t)
+
+
+_CHI_K_DESCRIPTION = "k in {1, 2, 3, 5, 10, 20, 50, 100, 160, 161, 300, 1e3, 1e4}"
+_CHI_TOLERANCE_REASON = (
+    "F(x) = P(k/2, x^2/2) and 1 - F(x) = Q(k/2, x^2/2), the functions of gamma_cdf and "
+    "gamma_sf, so they get gamma's tolerance 1e-12. The condition number |x f(x) / F(x)| is "
+    "twice gamma's at t = x^2/2, but t is not an exact double: rounding x * x (as SciPy and "
+    "statrs do; halving is exact) costs gamma's condition number at t times 2^-53. Degrees of "
+    "freedom stop at 1e4 (shape 5e3), where gamma's largest condition number at a normal result "
+    "is 2.1e3 (t = a -+ 30 sqrt(a)) and rounding costs at most 2.4e-13; at k = 2e6 (gamma's "
+    "a = 1e6) it would cost 3.3e-12, beyond the tolerance. Results below 2.2e-308 are judged "
+    "relative to that number (conventions). SciPy's worst error at the other points is 3.0e-13 "
+    "(sf, k = 1000, x = sqrt(2 (a + 3 sqrt(a)))); it is 1.3e-12 and 5.1e-12 off at k = 1e4 "
+    "(cdf at x = 75.88, sf at x = 119.34, where the finite sum DLMF 8.4.10 confirms mpmath), "
+    "flushes 1 cdf and 3 sf subnormal results to 0, and for k = 1 loses digits where x * x "
+    "is subnormal (x = 4e-162 and 1e-160) and returns 0 where it underflows (x = 1e-170)"
+)
+_CHI_X_DESCRIPTION = (
+    f"{_CHI_K_DESCRIPTION} x x = sqrt(2 t) (rounded to a double) for t in {{1e-300, 1e-100, "
+    "1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 700, 750, "
+    "1e3, 1e4, 1e5, 1e6, 1e7, 1e10, 1e300} and t = a + j sqrt(a) with a = k/2 (rounded to a "
+    "double first) for j in {-30, -10, -3, -1, 1, 3, 10, 30} where positive, plus x = 0, "
+    "5e-324, 1e-170, 4e-162 and 1e-160 (where x * x / 2 underflows to 0, 1e-323 or a "
+    "subnormal), 1e155 and 1e300 (where x * x overflows)"
+)
+
+CHI_CDF = Spec(
+    name="chi_cdf",
+    description=(
+        "Chi distribution cumulative distribution function P(k/2, x^2/2) (k degrees of freedom)"
+    ),
+    inputs=("k", "x"),
+    tolerance=1e-12,
+    tolerance_reason=_CHI_TOLERANCE_REASON,
+    grid_description=_CHI_X_DESCRIPTION,
+    grid=_chi_x_grid,
+    mpmath_fn=_mp_chi_cdf,
+    scipy_name="scipy.stats.chi.cdf",
+    scipy_fn=lambda k, x: st.chi.cdf(x, k),
+)
+
+CHI_SF = Spec(
+    name="chi_sf",
+    description=(
+        "Chi distribution survival function Q(k/2, x^2/2) = 1 - F(x) (k degrees of freedom)"
+    ),
+    inputs=("k", "x"),
+    tolerance=1e-12,
+    tolerance_reason=_CHI_TOLERANCE_REASON,
+    grid_description=f"the chi_cdf grid: {_CHI_X_DESCRIPTION}",
+    grid=_chi_x_grid,
+    mpmath_fn=_mp_chi_sf,
+    scipy_name="scipy.stats.chi.sf",
+    scipy_fn=lambda k, x: st.chi.sf(x, k),
+)
+
+CHI_PPF = Spec(
+    name="chi_ppf",
+    description=(
+        "Chi distribution quantile function, the x with P(k/2, x^2/2) = p (k degrees of "
+        "freedom); sqrt(2 t) with t the gamma quantile"
+    ),
+    inputs=("k", "p"),
+    tolerance=2e-13,
+    tolerance_reason=(
+        "As for gamma_ppf: the quantile is x = sqrt(2 t) with t = exp(L), and rounding L (or 2/k, "
+        "which multiplies it in the lower tail) to a double changes t by |L| times 2^-53 and x by "
+        "half that. The largest |L| / 2 = |log(x / sqrt(2))| at a nonzero, normal quantile on "
+        "this grid is 690.9 (k = 1, p = 1e-300, x = 1.25e-300), so up to 7.7e-14 is "
+        "unavoidable; 2e-13 allows 2.6x that and matches gamma_ppf. Subnormal quantiles are "
+        "judged relative to 2.2e-308 (conventions). SciPy's worst error at the points it gets "
+        "within tolerance is 1.8e-14 (k = 3, p = 1e-300); it fails 4: 0 instead of 1.25e-300 "
+        "at k = 1, p = 1e-300, and 1.2e-9 to 1.6e-8 off at p = 5e-324 for k >= 300"
+    ),
+    grid_description=(
+        f"{_CHI_K_DESCRIPTION} x the gamma_ppf probabilities p in {{0, 5e-324, 1e-300, 1e-100, "
+        "1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, 1/2 - 1e-10, 1/2, "
+        "1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, 0.99, 0.999, and the doubles nearest 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15, 1}; the quantile is 0 at p = 0 (the end of the support) and "
+        "p = 1 is tagged pole (+inf)"
+    ),
+    grid=_chi_ppf_grid,
+    mpmath_fn=_mp_chi_ppf,
+    scipy_name="scipy.stats.chi.ppf",
+    scipy_fn=lambda k, p: st.chi.ppf(p, k),
+    input_tags=_gamma_ppf_tags,
+)
+
 # --- exponential distribution ---------------------------------------------------
 
 
@@ -2729,7 +2881,7 @@ ALL: tuple[Spec, ...] = (
     ERFCX, ERFC, GAMMA, GAMMAINC, BETAINC, BETAINC_LARGE, BETAINC_SWITCH, KV, YV,
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
-    INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
+    INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, CHI_CDF, CHI_SF, CHI_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     SKEWTEST,
     F_CDF, F_SF, F_PPF,
