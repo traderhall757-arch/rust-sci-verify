@@ -538,7 +538,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 21: statrs Chi distribution** (statrs `Chi::cdf`,
   `sf`, `inverse_cdf`;
-  [PR #35](https://github.com/traderhall757-arch/rust-sci-verify/pull/35), open):
+  [PR #35](https://github.com/traderhall757-arch/rust-sci-verify/pull/35), merged):
   - New datasets `chi_cdf` and `chi_sf` (514 points each: 13 degrees of
     freedom k from 1 to 1e4, including 160 and 161 around statrs's switch of
     density formula, x x = sqrt(2 t) for the gamma_cdf grid's t at shape
@@ -567,12 +567,36 @@ _Updated at the end of every session. Start here._
     point off-grid scan, seed 20261016). Confirmed with a bit-exact copy of
     the search.
 
+- **Milestone 4, part 22: statrs Weibull distribution** (statrs
+  `Weibull::cdf`, `sf`, `inverse_cdf`; PR open, branch `claude/statrs-weibull`):
+  - New datasets `weibull_cdf` and `weibull_sf` (1139 points each: shapes
+    0.1 to 100 x scales 2^-500, 2^-10, 1, 2^10, 2^500, x = u * scale with
+    u^k from 1e-300 to 1e300, plus x = 0 and -scale) and `weibull_ppf`
+    (1215 points, the gamma_ppf probabilities; p = 1 tagged `pole`).
+    Tolerance 1e-13. Scales are powers of two so x / scale is exact (the
+    sf's condition number in x is k t, up to about 70,000, so otherwise no
+    method could meet 1e-13); this leaves non-power-of-two scales
+    unchecked. Reference `-expm1(-t)`, `exp(-t)` with t = (x/scale)^k, and
+    scale (-log1p(-p))^(1/k), tested against the exponential (shape 1),
+    quadrature of the density and cdf(ppf(p)) = p. SciPy passes every point.
+  - All three fail where statrs's stored `scale.powf(-shape)` (or
+    `x.powf(shape)`, or `-ln_1p(-p) / scale.powf(-shape)`) overflows,
+    underflows or is subnormal although the answer is moderate: NaN, 0, 1
+    or inf. `cdf` 177 and `sf` 180 of 1139: **finding 037** (high);
+    `inverse_cdf` 214 of 1215: **finding 038** (high); both approved by
+    Claude after the checklist. Ordinary parameters are hit too (shape 100,
+    scale 1/1024: `cdf` wrong for every x below 7.8e-4). Random scans (seed
+    20261017): every failure but one sf rounding case has an out-of-range
+    intermediate; computing t = (x / scale)^shape first (and multiplying the
+    quantile by scale last) fixes every grid point.
+  - `pdf` and `ln_pdf` use the same stored power; not checked.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 21, statrs
-   `Chi`, findings 035 and 036).
+1. **Owner: review and merge the open PR** (Milestone 4 part 22, statrs
+   `Weibull`, findings 037 and 038).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Closed-form statrs distributions:** `Weibull`, `LogNormal`,
+   - **Closed-form statrs distributions:** `LogNormal`,
      `Pareto`, `Gumbel`, `Laplace`, `Cauchy`, `Levy` (look for finding
      023's `1 - exp(..)`). Each needs small new datasets; suggested next, as
      it needs no exact discrete distributions.
@@ -599,7 +623,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 036 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 038 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -644,7 +668,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
