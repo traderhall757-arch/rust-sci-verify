@@ -23,6 +23,9 @@ Start every session by reading `docs/status.md`. Read `docs/roadmap.md` only whe
 10. Push at the end of each meaningful step. One milestone per session; then update
     `docs/status.md`, push, and tell the owner to start a fresh session.
 11. The owner merges PRs. Never commit to `main` directly.
+12. Standing approval (owner, 2026-10-16): pushing branches to `origin` and opening or
+    updating PRs in this repo need no extra ask. Merging stays with the owner (rule 11);
+    rule 8 still applies to other projects.
 
 ## Commands (keep output quiet)
 ```sh
