@@ -537,7 +537,8 @@ _Updated at the end of every session. Start here._
     region failing on `gammainc`, `gamma_cdf` and `gamma_sf`.
 
 - **Milestone 4, part 21: statrs Chi distribution** (statrs `Chi::cdf`,
-  `sf`, `inverse_cdf`; PR link below, open):
+  `sf`, `inverse_cdf`;
+  [PR #35](https://github.com/traderhall757-arch/rust-sci-verify/pull/35), open):
   - New datasets `chi_cdf` and `chi_sf` (514 points each: 13 degrees of
     freedom k from 1 to 1e4, including 160 and 161 around statrs's switch of
     density formula, x x = sqrt(2 t) for the gamma_cdf grid's t at shape
