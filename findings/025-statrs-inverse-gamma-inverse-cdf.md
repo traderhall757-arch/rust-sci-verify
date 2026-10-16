@@ -25,8 +25,9 @@
      3.8% off): `cdf` near p has one significant bit.
 
 Group 1 is the serious one: for a in that range the quantile is wrong at
-almost every p. The same search is used by `Chi::inverse_cdf` (not yet
-checked).
+almost every p. The same search is used by `Chi::inverse_cdf` (checked
+2026-10-16: [finding 036](036-statrs-chi-inverse-cdf.md); there only cause 3
+occurs, made worse by the chi cdf's zeros).
 
 ## Reproduction
 
@@ -144,6 +145,7 @@ direct callers +inf or NaN for shapes above about 108 (seen in the
 reproduction; the density is not checked against reference data in this
 project). The bracket and the stopping rule are in the shared
 `newton_raphson_quantile`, so `Chi::inverse_cdf`, its only other caller,
-should be checked next. Boost.Math computes this quantile as
+was checked next: [finding 036](036-statrs-chi-inverse-cdf.md) (cause 3 at
+subnormal p; causes 1 and 2 do not occur on its grid or scan). Boost.Math computes this quantile as
 1 / gamma_q_inv(a, p) with no density of its own; SciPy as
 1 / gammainccinv(a, p).

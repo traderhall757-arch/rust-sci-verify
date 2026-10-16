@@ -4,7 +4,7 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 
 use crate::expected;
 use statrs::distribution::{
-    Beta, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, InverseGamma, Normal,
+    Beta, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, InverseGamma, Normal,
     StudentsT,
 };
 use statrs::function::{beta, erf, gamma};
@@ -71,6 +71,15 @@ fn chi_squared(a: f64) -> ChiSquared {
 /// data's parametrisation).
 fn inverse_gamma(a: f64) -> InverseGamma {
     InverseGamma::new(a, 1.0).expect("valid parameters")
+}
+
+/// The chi distribution with `k` degrees of freedom (an integer in the data).
+fn chi(k: f64) -> Chi {
+    assert!(
+        k.fract() == 0.0 && k >= 1.0,
+        "chi data has a non-integer k: {k}"
+    );
+    Chi::new(k as u64).expect("valid parameters")
 }
 
 /// The exponential distribution with rate 1 (the reference data's).
@@ -446,6 +455,53 @@ fn statrs_matches_reference() {
         }
         .run_with_time_limit(TIME_LIMIT, |p| {
             Outcome::scalar(inverse_gamma(p.scalar("a")).inverse_cdf(p.scalar("p")))
+        }),
+        Check {
+            function: "statrs::distribution::Chi::cdf",
+            dataset: "chi_cdf",
+            expected: &[
+                Expected {
+                    finding: "012-statrs-gamma-cdf",
+                    points: expected::CHI_CDF,
+                },
+                Expected {
+                    finding: "035-statrs-chi-cdf",
+                    points: expected::CHI_SQUARE_RANGE,
+                },
+                Expected {
+                    finding: "035-statrs-chi-cdf",
+                    points: expected::CHI_CDF_SUBNORMAL_SQUARE,
+                },
+            ],
+        }
+        .run(|p| Outcome::scalar(chi(p.scalar("k")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Chi::sf",
+            dataset: "chi_sf",
+            expected: &[
+                Expected {
+                    finding: "012-statrs-gamma-cdf",
+                    points: expected::CHI_SF,
+                },
+                Expected {
+                    finding: "035-statrs-chi-cdf",
+                    points: expected::CHI_SQUARE_RANGE,
+                },
+            ],
+        }
+        .run(|p| Outcome::scalar(chi(p.scalar("k")).sf(p.scalar("x")))),
+        // Time-limited like `InverseGamma::inverse_cdf`: the same search, and
+        // `cdf`'s series and continued fraction have no iteration limit.
+        Check {
+            function: "statrs::distribution::Chi::inverse_cdf",
+            dataset: "chi_ppf",
+            expected: &[Expected {
+                finding: "036-statrs-chi-inverse-cdf",
+                points: expected::CHI_PPF,
+            }],
+        }
+        .run_with_time_limit(TIME_LIMIT, |p| {
+            Outcome::scalar(chi(p.scalar("k")).inverse_cdf(p.scalar("p")))
         }),
         Check {
             function: "statrs::distribution::Exp::cdf",

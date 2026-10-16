@@ -4,7 +4,8 @@
   `statrs::distribution::ChiSquared`, methods `cdf` and `sf` of
   `ContinuousCDF`; both call `statrs::function::gamma::gamma_lr` /
   `gamma_ur`; `statrs::distribution::Erlang` calls `Gamma`'s, and
-  `statrs::distribution::InverseGamma` calls them at 1/x)
+  `statrs::distribution::InverseGamma` calls them at 1/x, and
+  `statrs::distribution::Chi` at x^2/2)
 - **Severity:** low (an accuracy loss: up to 1.2e-9 on the grid and
   3.4e-9 off it, about 9 correct digits), plus subnormal results
   flushed to 0
@@ -28,7 +29,16 @@
   a >= 1000, worst 2.5e-11, and the subnormal results at a = 5, x = 1/750
   (`cdf`, true 2.5e-316) and a = 50, x = 1/1e-5 (`sf`, true 3.3e-315). Rounding
   1/x costs at most 3.4e-13 on that grid (its tolerance reason). Its
-  panics for tiny x are finding 024. Called directly (added 2026-10-15),
+  panics for tiny x are finding 024. `Chi::cdf` is `gamma_lr(k/2, x^2/2)` and
+  `sf` is `gamma_ur(k/2, x^2/2)`, so it fails at 6 of 514 points of
+  `reference/data/chi_cdf.jsonl` and 7 of 514 of
+  `reference/data/chi_sf.jsonl` for the same two causes (lists `CHI_CDF` and
+  `CHI_SF`; added 2026-10-16): 9 points at k = 1e4 (shape 5e3), worst
+  8.6e-12, and subnormal results returned as 0 (`cdf` at k = 100, true
+  3.3e-315; `sf` at k = 10, 160 and 161, true 2.5e-316 to 2.2e-314).
+  Rounding x * x costs at most 2.4e-13 on that grid (its tolerance reason);
+  in finding 035's scan the errors start at k = 1454. Its panics where
+  x * x under- or overflows are finding 035. Called directly (added 2026-10-15),
   `statrs::function::gamma::gamma_lr` fails at 1 of 192 points of
   `reference/data/gammainc.jsonl` (a = 200, x = 2: true 2.8e-316, returned
   as 0; list `GAMMA_LR`; its panics at x = 0 are finding 032) and at 14 of
