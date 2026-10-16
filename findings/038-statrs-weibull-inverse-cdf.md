@@ -91,7 +91,7 @@ dataset.
    every point. With m in [-1000, 1000], `inverse_cdf` fails 11,970; with
    m in [-20, 20], 3,180. Every failure has scale^-shape or
    L / scale^-shape outside the normal range (checked point by point); on
-   the grid all 877 points with both inside pass.
+   the grid no point with both inside fails.
 5. **Root cause** (from the source, `src/distribution/weibull.rs`): `new`
    stores `scale_pow_shape_inv = scale.powf(-shape)`, and `inverse_cdf`
    computes `(-((-p).ln_1p() / scale_pow_shape_inv)).powf(1.0 / shape)`,

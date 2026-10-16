@@ -104,8 +104,8 @@ the last digit at every row except the subnormal sf (3.8e-14 relative to
    100 digits agreed at every point. With m in [-1000, 1000], `cdf` fails
    15,274 and `sf` 14,140; with m in [-20, 20], 4,237 and 2,530. In both
    scans every failure but the one sf point above has scale^-shape or
-   x^shape outside the normal range (checked point by point); on the grid
-   all 914 points with both inside pass.
+   x^shape outside the normal range (checked point by point); on the grid no
+   point with both inside fails.
 5. **Root cause** (from the source, `src/distribution/weibull.rs`): `new`
    stores `scale_pow_shape_inv = scale.powf(-shape)`, and `cdf` and `sf`
    compute `-(-x.powf(shape) * scale_pow_shape_inv).exp_m1()` and

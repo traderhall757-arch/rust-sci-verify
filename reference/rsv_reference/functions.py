@@ -1872,11 +1872,12 @@ WEIBULL_SF = Spec(
     tolerance=1e-13,
     tolerance_reason=(
         "x, k and lambda are exact doubles and lambda is a power of two, so x/lambda is exact "
-        "and only t = (x/lambda)^k must be rounded (pow is within an ulp or so in any good "
-        "libm). The condition number in t is t itself, 708.4 at the last normal result, so "
-        "that one rounding costs up to 7.9e-14 there, as for expon_sf with another rate; "
-        "exp adds an ulp. Results below 2.2e-308 are judged relative to that number "
-        "(conventions)"
+        "and only t = (x/lambda)^k must be rounded. A good libm's pow is within about half "
+        "an ulp (glibc's bound is 0.52 ulp, 1.04 2^-53 relative). The condition number in t "
+        "is t itself, 708.4 at the last normal result, so that rounding costs up to 8.2e-14 "
+        "there (7.9e-14 if correctly rounded, as for expon_sf with another rate); a pow "
+        "error of a full ulp would cost 1.6e-13. SciPy's worst error here is 5.4e-14. "
+        "Results below 2.2e-308 are judged relative to that number (conventions)"
     ),
     grid_description=(
         f"the weibull_cdf grid: {_WEIBULL_X_DESCRIPTION}; Q is 1 for x <= 0, subnormal from "

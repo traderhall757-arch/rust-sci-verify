@@ -1201,7 +1201,8 @@ def test_weibull_condition_numbers_match_the_tolerance_reasons():
         normal = [p for p in grid if functions._mp_weibull_sf(*mp(*p)) >= mpmath.mpf(2) ** -1022]
         worst = max(functions.weibull_sf_condition_in_t(*p) for p in normal)
         assert 700 < worst < 708.4
-        assert 708.4 * 2.0**-53 < 7.9e-14 < functions.WEIBULL_SF.tolerance
+        assert 708.4 * 2.0**-53 < 7.9e-14
+        assert 708.4 * 1.04 * 2.0**-53 < 8.2e-14 < functions.WEIBULL_SF.tolerance
 
 
 def test_weibull_ppf_rounding_of_one_over_k_matches_the_tolerance_reason():
