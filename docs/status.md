@@ -568,7 +568,8 @@ _Updated at the end of every session. Start here._
     the search.
 
 - **Milestone 4, part 22: statrs Weibull distribution** (statrs
-  `Weibull::cdf`, `sf`, `inverse_cdf`; PR open, branch `claude/statrs-weibull`):
+  `Weibull::cdf`, `sf`, `inverse_cdf`;
+  [PR #36](https://github.com/traderhall757-arch/rust-sci-verify/pull/36), open):
   - New datasets `weibull_cdf` and `weibull_sf` (1139 points each: shapes
     0.1 to 100 x scales 2^-500, 2^-10, 1, 2^10, 2^500, x = u * scale with
     u^k from 1e-300 to 1e300, plus x = 0 and -scale) and `weibull_ppf`
