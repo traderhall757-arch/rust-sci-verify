@@ -1745,6 +1745,177 @@ EXPON_PPF = Spec(
     input_tags=_expon_ppf_tags,
 )
 
+# --- Weibull distribution (shape k, scale lambda) ------------------------------
+
+# F(x) = 1 - exp(-(x/lambda)^k) for x >= 0. Scales are powers of two, so
+# x/lambda is exact for every grid x (each is u * lambda with u and the
+# product normal doubles): only t = (x/lambda)^k needs rounding. Scales
+# 2^-500 and 2^500 make lambda^-k overflow or underflow (to 0 or a
+# subnormal) for shapes from 2 up, which a method that computes x^k and
+# lambda^-k apart cannot survive.
+_WEIBULL_SHAPES = (0.1, 0.5, 1.0, 1.5, 2.0, 2.1, 3.5, 10.0, 100.0)
+_WEIBULL_SCALE_EXPONENTS = (-500, -10, 0, 10, 500)
+# Targets for t = (x/lambda)^k: both tails, the bulk, where the cdf rounds to
+# 1 (37), where the sf becomes subnormal (708.4) and 0 (745.13), and beyond.
+_WEIBULL_T = (1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0,
+              37.0, 50.0, 100.0, 300.0, 700.0, 708.5, 740.0, 745.5, 1e3, 1e10, 1e300)  # fmt: skip
+
+
+def _weibull_x_grid() -> list[tuple[float, float, float]]:
+    # x = u lambda with u the double nearest t^(1/k); kept where u and x are
+    # normal and finite (then x/lambda = u exactly). Plus x = 0 and x = -lambda.
+    points = set()
+    for k in _WEIBULL_SHAPES:
+        for m in _WEIBULL_SCALE_EXPONENTS:
+            scale = math.ldexp(1.0, m)
+            points.update({(k, scale, 0.0), (k, scale, -scale)})
+            for t in _WEIBULL_T:
+                # float() rounds to nearest; only normal u are kept.
+                with mpmath.workdps(40):
+                    u = float(mpmath.mpf(t) ** (1 / mpmath.mpf(k)))
+                x = u * scale
+                if 2.0**-1022 <= u < math.inf and 2.0**-1022 <= x < math.inf:
+                    points.add((k, scale, x))
+    return sorted(points)
+
+
+def _mp_weibull_t(k: mpmath.mpf, scale: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    # (x/lambda)^k with 60 extra bits, so rounding it costs nothing at the working precision.
+    with mpmath.extraprec(60):
+        return (x / scale) ** k
+
+
+def _mp_weibull_cdf(k: mpmath.mpf, scale: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = -expm1(-(x/lambda)^k), 0 for x <= 0; mpmath.expm1 keeps full
+    relative precision for tiny t."""
+    return -mpmath.expm1(-_mp_weibull_t(k, scale, x)) if x > 0 else mpmath.mpf(0)
+
+
+def _mp_weibull_sf(k: mpmath.mpf, scale: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """1 - F(x) = exp(-(x/lambda)^k), 1 for x <= 0."""
+    return mpmath.exp(-_mp_weibull_t(k, scale, x)) if x > 0 else mpmath.mpf(1)
+
+
+def weibull_cdf_condition_in_t(k: float, scale: float, x: float) -> mpmath.mpf:
+    """|t dF/dt / F| = t / (e^t - 1) at t = (x/lambda)^k: at most 1."""
+    t = _mp_weibull_t(mpmath.mpf(k), mpmath.mpf(scale), mpmath.mpf(x))
+    return t / mpmath.expm1(t)
+
+
+def weibull_sf_condition_in_t(k: float, scale: float, x: float) -> mpmath.mpf:
+    """|t dQ/dt / Q| = t at t = (x/lambda)^k."""
+    return _mp_weibull_t(mpmath.mpf(k), mpmath.mpf(scale), mpmath.mpf(x))
+
+
+def _weibull_ppf_grid() -> list[tuple[float, float, float]]:
+    ps = sorted({p for _, p in _gamma_ppf_grid()})
+    return [
+        (k, math.ldexp(1.0, m), p)
+        for k in _WEIBULL_SHAPES
+        for m in _WEIBULL_SCALE_EXPONENTS
+        for p in ps
+    ]
+
+
+def _weibull_ppf_tags(k: float, scale: float, p: float) -> list[str]:
+    # The quantile is +inf at p = 1. At p = 0 it is 0, the end of the support:
+    # a finite value, so not a pole.
+    return [POLE] if p == 1.0 else []
+
+
+def _mp_weibull_ppf(k: mpmath.mpf, scale: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """x = lambda (-log1p(-p))^(1/k); -p is exact and mpmath.log1p keeps full
+    relative precision for tiny p."""
+    with mpmath.extraprec(60):
+        return scale * (-mpmath.log1p(-p)) ** (1 / k)
+
+
+_WEIBULL_PARAMETERS_DESCRIPTION = (
+    "shape k in {0.1, 0.5, 1, 1.5, 2, 2.1, 3.5, 10, 100} x scale lambda = 2^m for m in "
+    "{-500, -10, 0, 10, 500}"
+)
+_WEIBULL_X_DESCRIPTION = (
+    f"{_WEIBULL_PARAMETERS_DESCRIPTION} x x = u lambda with u the double nearest t^(1/k) for "
+    "t in {1e-300, 1e-100, 1e-20, 1e-10, 1e-5, 1e-3, 0.1, 0.5, 1, 2, 5, 10, 20, 37, 50, 100, "
+    "300, 700, 708.5, 740, 745.5, 1e3, 1e10, 1e300}, kept where u and x are normal and finite "
+    "(so x/lambda = u exactly), plus x = 0 and x = -lambda"
+)
+
+WEIBULL_CDF = Spec(
+    name="weibull_cdf",
+    description=(
+        "Weibull distribution cumulative distribution function 1 - exp(-(x/lambda)^k) "
+        "(shape k, scale lambda)"
+    ),
+    inputs=("k", "lambda", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x, k and lambda are exact doubles and lambda is a power of two, so x/lambda is exact "
+        "and only t = (x/lambda)^k must be rounded (pow is within an ulp or so in any good "
+        "libm), then -expm1(-t) is within an ulp. The condition number in t, t / (e^t - 1), is "
+        "at most 1, so a careful method loses a few ulps at most. 1e-13 as for the other "
+        "functions; results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_WEIBULL_X_DESCRIPTION}; F is 0 for x <= 0 and rounds to 1 above about t = 37.4"
+    ),
+    grid=_weibull_x_grid,
+    mpmath_fn=_mp_weibull_cdf,
+    scipy_name="scipy.stats.weibull_min.cdf",
+    scipy_fn=lambda k, scale, x: st.weibull_min.cdf(x, k, scale=scale),
+)
+
+WEIBULL_SF = Spec(
+    name="weibull_sf",
+    description="Weibull distribution survival function exp(-(x/lambda)^k) (shape k, scale lambda)",
+    inputs=("k", "lambda", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x, k and lambda are exact doubles and lambda is a power of two, so x/lambda is exact "
+        "and only t = (x/lambda)^k must be rounded. A good libm's pow is within about half "
+        "an ulp (glibc's bound is 0.52 ulp, 1.04 2^-53 relative). The condition number in t "
+        "is t itself, 708.4 at the last normal result, so that rounding costs up to 8.2e-14 "
+        "there (7.9e-14 if correctly rounded, as for expon_sf with another rate); a pow "
+        "error of a full ulp would cost 1.6e-13. SciPy's worst error here is 5.4e-14. "
+        "Results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"the weibull_cdf grid: {_WEIBULL_X_DESCRIPTION}; Q is 1 for x <= 0, subnormal from "
+        "about t = 708.40 and 0 above about t = 745.13"
+    ),
+    grid=_weibull_x_grid,
+    mpmath_fn=_mp_weibull_sf,
+    scipy_name="scipy.stats.weibull_min.sf",
+    scipy_fn=lambda k, scale, x: st.weibull_min.sf(x, k, scale=scale),
+)
+
+WEIBULL_PPF = Spec(
+    name="weibull_ppf",
+    description="Weibull distribution quantile function lambda (-log(1 - p))^(1/k)",
+    inputs=("k", "lambda", "p"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "p is an exact double, so L = -log1p(-p) is within an ulp or so; raising it to 1/k "
+        "multiplies that error by 1/k (at most 10 on this grid) and adds an ulp, and "
+        "multiplying by lambda (a power of two) is exact. 1/k itself is not a double for most "
+        "k: rounding it (or log(L) / k) costs |log(x/lambda)| 2^-53, at most 744.4 2^-53 = "
+        "8.3e-14 at a normal result on this grid (p = 5e-324). 1e-13 as for the other "
+        "functions; results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_WEIBULL_PARAMETERS_DESCRIPTION} x the gamma_ppf probabilities: p = 0, 5e-324, "
+        "1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, "
+        "1/2 - 1e-10, 1/2, 1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, 0.99, 0.999, 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15 and 1; the quantile is 0 at p = 0 (the end of the support) and "
+        "p = 1 is tagged pole (+inf)"
+    ),
+    grid=_weibull_ppf_grid,
+    mpmath_fn=_mp_weibull_ppf,
+    scipy_name="scipy.stats.weibull_min.ppf",
+    scipy_fn=lambda k, scale, p: st.weibull_min.ppf(p, k, scale=scale),
+    input_tags=_weibull_ppf_tags,
+)
+
 # --- hypothesis tests: one-sample t-test --------------------------------------
 
 # Deterministic samples x_i = loc + z_i with z_i = ((7919 i) mod 1000 - 500) / 1000
@@ -2882,6 +3053,7 @@ ALL: tuple[Spec, ...] = (
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
     INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, CHI_CDF, CHI_SF, CHI_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
+    WEIBULL_CDF, WEIBULL_SF, WEIBULL_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     SKEWTEST,
     F_CDF, F_SF, F_PPF,

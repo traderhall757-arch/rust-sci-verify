@@ -1117,6 +1117,111 @@ def test_expon_sf_underflows_where_the_grid_description_says():
         assert functions._mp_expon_cdf(mpmath.mpf(37.5)) > 1 - mpmath.mpf(2) ** -54
 
 
+@pytest.mark.parametrize("x", [5e-324, 1e-300, 1e-16, 1e-5, 0.5, 1.0, 37.5, 708.5, 745.0])
+def test_weibull_with_shape_1_is_the_exponential(x):
+    # Shape 1, scale 1 is the exponential distribution with rate 1.
+    with mpmath.workdps(50):
+        (x,) = mp(x)
+        one = mpmath.mpf(1)
+        assert close(functions._mp_weibull_cdf(one, one, x), functions._mp_expon_cdf(x))
+        assert close(functions._mp_weibull_sf(one, one, x), functions._mp_expon_sf(x))
+
+
+@pytest.mark.parametrize(
+    ("k", "scale", "x"),
+    [(0.1, 2.0**-500, 2.0**-510), (0.5, 1.0, 0.3), (1.5, 1024.0, 900.0), (2.1, 2.0**500, 2.0**501),
+     (3.5, 2.0**-10, 2.0**-11), (10.0, 1.0, 1.2), (100.0, 1024.0, 1030.0)],
+)  # fmt: skip
+def test_weibull_cdf_and_sf_match_the_integral_of_the_density(k, scale, x):
+    # F(x) = integral of f(s) = (k / lambda) (s/lambda)^(k-1) exp(-(s/lambda)^k)
+    # from 0 to x, by quadrature in w with s/lambda = w^m, m = ceil(1/k), which
+    # removes the singularity at 0 for k < 1: the integrand is
+    # m k w^(m k - 1) exp(-w^(m k)).
+    with mpmath.workdps(50):
+        k, scale, x = mp(k, scale, x)
+        m = math.ceil(1 / k)
+        end = (x / scale) ** (mpmath.mpf(1) / m)
+        integral = mpmath.quad(
+            lambda w: m * k * w ** (m * k - 1) * mpmath.exp(-(w ** (m * k))), [0, end / 2, end]
+        )
+        cdf = functions._mp_weibull_cdf(k, scale, x)
+        assert close(cdf, integral)
+        assert close(cdf + functions._mp_weibull_sf(k, scale, x), 1)
+
+
+def test_weibull_cdf_and_sf_below_the_support():
+    with mpmath.workdps(50):
+        for k in mp(0.1, 2.0, 100.0):
+            for x in mp(-1e300, -1.0, 0.0):
+                assert functions._mp_weibull_cdf(k, mpmath.mpf(2), x) == 0
+                assert functions._mp_weibull_sf(k, mpmath.mpf(2), x) == 1
+
+
+def test_weibull_grid_has_exact_standardised_x():
+    # Every positive x is u * lambda with u and x normal doubles, so x / lambda
+    # is exact (the tolerance reasons rely on it).
+    grid = functions.WEIBULL_CDF.grid()
+    assert len(grid) == 1139
+    for k, scale, x in grid:
+        assert math.frexp(scale)[0] == 0.5  # a power of two
+        if x > 0:
+            u = x / scale
+            assert 2.0**-1022 <= u < math.inf and u * scale == x
+
+
+@pytest.mark.parametrize("p", [5e-324, 1e-300, 1e-16, 0.25, 0.5, 0.75, 1 - 1e-10, 1 - 2.0**-53])
+@pytest.mark.parametrize(("k", "scale"), [(0.1, 2.0**-500), (2.1, 1.0), (100.0, 2.0**500)])
+def test_weibull_ppf_inverts_the_cdf_and_matches_the_log(k, scale, p):
+    # F(ppf(p)) = p (relative to min(p, 1 - p)), and ppf(p) = lambda
+    # (-log(1 - p))^(1/k) with 1 - p exact (1200 bits hold 1 - 2^-1074).
+    with mpmath.workdps(50):
+        k, scale, p = mp(k, scale, p)
+        x = functions._mp_weibull_ppf(k, scale, p)
+        if p < 0.5:
+            assert close(functions._mp_weibull_cdf(k, scale, x), p)
+        else:
+            assert close(functions._mp_weibull_sf(k, scale, x), 1 - p)
+        with mpmath.workprec(1200):
+            route = scale * mpmath.exp(mpmath.log(-mpmath.log(1 - p)) / k)
+        assert close(x, route)
+        assert functions._mp_weibull_ppf(k, scale, mpmath.mpf(0)) == 0
+
+
+def test_weibull_ppf_poles_are_tagged_by_rule():
+    assert functions._weibull_ppf_tags(2.0, 1.0, 1.0) == [POLE]
+    assert functions._weibull_ppf_tags(2.0, 1.0, 0.0) == []
+    assert functions._weibull_ppf_tags(2.0, 1.0, 1 - 2.0**-53) == []
+
+
+def test_weibull_condition_numbers_match_the_tolerance_reasons():
+    # cdf: at most 1 in t; sf: t, below 708.4 at every normal result.
+    with mpmath.workdps(30):
+        grid = [(k, s, x) for k, s, x in functions.WEIBULL_CDF.grid() if x > 0]
+        assert max(functions.weibull_cdf_condition_in_t(*p) for p in grid) <= 1
+        normal = [p for p in grid if functions._mp_weibull_sf(*mp(*p)) >= mpmath.mpf(2) ** -1022]
+        worst = max(functions.weibull_sf_condition_in_t(*p) for p in normal)
+        assert 700 < worst < 708.4
+        assert 708.4 * 2.0**-53 < 7.9e-14
+        assert 708.4 * 1.04 * 2.0**-53 < 8.2e-14 < functions.WEIBULL_SF.tolerance
+
+
+def test_weibull_ppf_rounding_of_one_over_k_matches_the_tolerance_reason():
+    # Rounding 1/k costs |log(x/lambda)| 2^-53; the largest at a normal result.
+    path = Path(__file__).resolve().parent.parent / "data" / "weibull_ppf.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()[1:]]
+    logs = [
+        (abs(math.log(y / r["in"]["lambda"][0])), r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags")
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= y < math.inf
+    ]
+    worst, p = max(logs)
+    assert p == 5e-324
+    assert 744.4 < worst < 744.5
+    assert worst * 2.0**-53 < 8.3e-14 < functions.WEIBULL_PPF.tolerance
+
+
 @pytest.mark.parametrize(
     ("a", "b", "p"),
     [
