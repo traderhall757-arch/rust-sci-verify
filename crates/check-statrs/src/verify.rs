@@ -5,7 +5,7 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 use crate::expected;
 use statrs::distribution::{
     Beta, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, InverseGamma, Normal,
-    StudentsT,
+    StudentsT, Weibull,
 };
 use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
@@ -80,6 +80,12 @@ fn chi(k: f64) -> Chi {
         "chi data has a non-integer k: {k}"
     );
     Chi::new(k as u64).expect("valid parameters")
+}
+
+/// The Weibull distribution with shape `k` and scale `lambda` (a power of two
+/// in the data).
+fn weibull(k: f64, lambda: f64) -> Weibull {
+    Weibull::new(k, lambda).expect("valid parameters")
 }
 
 /// The exponential distribution with rate 1 (the reference data's).
@@ -502,6 +508,35 @@ fn statrs_matches_reference() {
         }
         .run_with_time_limit(TIME_LIMIT, |p| {
             Outcome::scalar(chi(p.scalar("k")).inverse_cdf(p.scalar("p")))
+        }),
+        Check {
+            function: "statrs::distribution::Weibull::cdf",
+            dataset: "weibull_cdf",
+            expected: &[Expected {
+                finding: "037-statrs-weibull-cdf",
+                points: expected::WEIBULL_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(weibull(p.scalar("k"), p.scalar("lambda")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Weibull::sf",
+            dataset: "weibull_sf",
+            expected: &[Expected {
+                finding: "037-statrs-weibull-cdf",
+                points: expected::WEIBULL_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(weibull(p.scalar("k"), p.scalar("lambda")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Weibull::inverse_cdf",
+            dataset: "weibull_ppf",
+            expected: &[Expected {
+                finding: "038-statrs-weibull-inverse-cdf",
+                points: expected::WEIBULL_PPF,
+            }],
+        }
+        .run(|p| {
+            Outcome::scalar(weibull(p.scalar("k"), p.scalar("lambda")).inverse_cdf(p.scalar("p")))
         }),
         Check {
             function: "statrs::distribution::Exp::cdf",
