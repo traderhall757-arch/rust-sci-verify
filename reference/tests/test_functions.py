@@ -1638,6 +1638,112 @@ def test_gumbel_ppf_near_inverse_e_cancels_within_the_extra_precision():
     assert 2.0**-60 < 1e-17 < worst
 
 
+_LAPLACE_GRID = set(functions.LAPLACE_CDF.grid())
+
+
+@pytest.mark.parametrize(
+    ("mu", "b", "x"),
+    [(0.0, 1.0, -740.0), (0.0, 1.0, -3.0), (0.0, 1.0, -(2.0**-60)), (0.0, 1.0, 0.0),
+     (0.0, 1.0, 2.0**-30), (0.0, 1.0, 2.5), (0.0, 1.0, 36.75), (0.0, 1.0, 700.0),
+     (0.0, 2.0**-500, 2.0**-498), (-10.0, 0.25, -10.5), (100.0, 8.0, 140.0),
+     (-_BIG, _BIG, -0.75 * _BIG), (-_BIG, _BIG, _BIG), (-_BIG, _BIG, 1.75 * _BIG)],
+)  # fmt: skip
+def test_laplace_cdf_and_sf_match_the_integral_of_the_density(mu, b, x):
+    # F = integral of e^-|t| / 2 dt from -inf to z = (x - mu) / b and Q the
+    # same from z to inf, by quadrature in t (no closed form involved), split
+    # at 0, where the density has a kink. Below z - 200 (or above z + 200) the
+    # integrand is below e^-200 times its value at z.
+    with mpmath.workdps(50):
+        mu, b, x = mp(mu, b, x)
+        assert (float(mu), float(b), float(x)) in _LAPLACE_GRID
+        z = (x - mu) / b
+
+        def density(t):
+            return mpmath.exp(-abs(t)) / 2
+
+        # mpmath.quad stops at an absolute error of about 10^-50, so the
+        # integrand is scaled by an exact power of two near 1 / density(z).
+        c = mpmath.ldexp(1, -mpmath.mag(density(z)))
+
+        def integral(lo, hi):
+            points = sorted({lo, hi} | ({mpmath.mpf(0)} if lo < 0 < hi else set()))
+            return mpmath.quad(lambda t: c * density(t), points) / c
+
+        lower = integral(min(z, 0) - 200, z) if z <= 0 else 1 - integral(z, max(z, 0) + 200)
+        upper = integral(z, max(z, 0) + 200) if z >= 0 else 1 - integral(min(z, 0) - 200, z)
+        assert close(functions._mp_laplace_cdf(mu, b, x), lower, digits=30)
+        assert close(functions._mp_laplace_sf(mu, b, x), upper, digits=30)
+
+
+def test_laplace_cdf_tail_is_half_the_exponential_sf():
+    # For z >= 0, Q = expon_sf(z) / 2 and F(-z) = Q(z) (symmetry); checks the
+    # branches and the mirror in _mp_laplace_sf, not exp itself.
+    with mpmath.workdps(50):
+        for z in (0.0, 2.0**-60, 3.0, 700.0, 1e5):
+            q = functions._mp_expon_sf(mpmath.mpf(z)) / 2
+            assert close(functions._mp_laplace_sf(*mp(0.0, 1.0, z)), q)
+            assert close(functions._mp_laplace_cdf(*mp(0.0, 1.0, -z)), q)
+            assert close(functions._mp_laplace_cdf(*mp(0.0, 1.0, z)), 1 - q)
+
+
+def test_laplace_grid_has_exact_standardised_x():
+    # Every x is mu + b z with b a power of two and z from _LAPLACE_Z, so
+    # z = (x - mu) / b is exact (the tolerance reasons rely on it).
+    grid = functions.LAPLACE_CDF.grid()
+    assert len(grid) == 1828
+    zs = {mpmath.mpf(z) for z in functions._LAPLACE_Z}
+    with mpmath.workprec(2200):
+        for mu, b, x in grid:
+            assert math.frexp(b)[0] == 0.5
+            assert x == 0 or 2.0**-1022 <= abs(x) < math.inf
+            assert (mpmath.mpf(x) - mu) / b in zs
+    # The points where x - mu exceeds the largest double although z is 2 to 2.75.
+    big = [x for mu, _, x in grid if mu == -_BIG and x - _BIG / 2 >= _BIG / 2]
+    assert big == [_BIG, 1.25 * _BIG, 1.5 * _BIG, 1.75 * _BIG]
+
+
+def test_laplace_ppf_matches_the_root_of_the_cdf():
+    # The quantile solves F(x) = p: found here by the secant method at 1200 bits
+    # from the cdf (exp only, no logarithm), starting next to the route's value.
+    for mu, b in [(0.0, 1.0), (100.0, 8.0), (-_BIG, _BIG)]:
+        for p in (5e-324, 1e-300, 1e-5, 0.25, 0.5 - 2.0**-54, 0.5, 0.5 + 2.0**-53, 0.95, 1 - 1e-15):
+            with mpmath.workdps(50):
+                route = functions._mp_laplace_ppf(*mp(mu, b, p))
+            with mpmath.workprec(1200):
+                m, bb, q = mp(mu, b, p)
+                start = route * (1 + mpmath.mpf(10) ** -30) + bb * mpmath.mpf(10) ** -30
+                root = mpmath.findroot(
+                    lambda x, m=m, bb=bb, q=q: functions._mp_laplace_cdf(m, bb, x) - q,
+                    (route, start),
+                )
+            with mpmath.workdps(50):
+                assert close(route, root)
+
+
+def test_laplace_ppf_poles_are_tagged_by_rule():
+    assert functions._laplace_ppf_tags(0.0, 1.0, 0.0) == [POLE]
+    assert functions._laplace_ppf_tags(0.0, 1.0, 1.0) == [POLE]
+    assert functions._laplace_ppf_tags(0.0, 1.0, 5e-324) == []
+    assert functions._laplace_ppf_tags(0.0, 1.0, 1 - 2.0**-53) == []
+
+
+def test_laplace_ppf_cancellation_matches_the_tolerance_reason():
+    # mu + b L costs (|mu| + |b L|) / |mu + b L| ulps: at most about 14 at a
+    # finite, nonzero, untagged quantile on this grid.
+    with mpmath.workdps(30):
+        ratios = []
+        for mu, b, p in functions.LAPLACE_PPF.grid():
+            if functions._laplace_ppf_tags(mu, b, p):
+                continue
+            x = functions._mp_laplace_ppf(*mp(mu, b, p))
+            if x != 0 and abs(x) < mpmath.mpf(2) ** 1024:
+                ratios.append((functions.laplace_ppf_cancellation(mu, b, p), mu, b, p))
+        worst, mu, b, p = max(ratios)
+        assert (mu, b, p) == (100.0, 8.0, 1e-5)
+        assert 13 < worst < 14
+        assert 14 * 2.0**-53 < 1.6e-15 < functions.LAPLACE_PPF.tolerance
+
+
 @pytest.mark.parametrize(
     ("a", "b", "p"),
     [
