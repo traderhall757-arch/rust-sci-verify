@@ -1222,6 +1222,123 @@ def test_weibull_ppf_rounding_of_one_over_k_matches_the_tolerance_reason():
     assert worst * 2.0**-53 < 8.3e-14 < functions.WEIBULL_PPF.tolerance
 
 
+@pytest.mark.parametrize(("mu", "sigma"), [(0.0, 0.25), (-3.0, 0.5), (0.0, 1.0), (2.0, 4.0)])
+def test_lognorm_cdf_and_sf_match_mpmath_ncdf(mu, sigma):
+    # Checks the wiring (ln x, mu, sigma, the sign of w) at every grid point.
+    # mpmath.ncdf is erfc(-w / sqrt 2) / 2 for w < 0, the same formula as
+    # _mp_norm_cdf, and (1 + erf(w / sqrt 2)) / 2 for w >= 0; the independent
+    # check of the tails is the quadrature test below.
+    with mpmath.workdps(50):
+        for m, s, x in functions.LOGNORM_CDF.grid():
+            if (m, s) != (mu, sigma) or x <= 0:
+                continue
+            m, s, x = mp(m, s, x)
+            w = (mpmath.log(x) - m) / s
+            assert close(functions._mp_lognorm_cdf(m, s, x), mpmath.ncdf(w))
+            assert close(functions._mp_lognorm_sf(m, s, x), mpmath.ncdf(-w))
+
+
+@pytest.mark.parametrize(
+    ("mu", "sigma", "w"),
+    [(0.0, 0.25, -1.0), (-3.0, 0.5, -37.5), (-3.0, 0.5, -8.0), (0.0, 1.0, 0.0), (0.0, 1.0, 1.5),
+     (0.0, 1.0, -30.0), (2.0, 4.0, -12.0), (2.0, 4.0, 37.5), (0.0, 0.25, 20.0)],
+)  # fmt: skip
+def test_lognorm_cdf_and_sf_match_the_integral_of_the_density(mu, sigma, w):
+    # F(x) = integral of f(s) = phi((ln s - mu) / sigma) / (s sigma) from 0 to
+    # x; with s = exp(mu + sigma (w - u)), w = (ln x - mu) / sigma, the
+    # integrand is phi(w - u) for u from 0 to infinity, and 1 - F(x) is the
+    # integral of phi(w + u). Both tails are integrated directly, out to the
+    # last normal result (|w| = 37.5), so no erfc is involved. The breakpoints
+    # follow the e^(-|w| u) decay; quadrature gives 47 or more digits here.
+    with mpmath.workdps(50):
+        x = float(mpmath.exp(mu + sigma * mpmath.mpf(w)))
+        mu, sigma, x = mp(mu, sigma, x)
+        w = (mpmath.log(x) - mu) / sigma
+        h = 1 / (1 + abs(w))
+        points = [0, h, 4 * h, 16 * h, 64 * h, mpmath.inf]
+
+        def tail(sign):
+            # phi(w + sign u) = phi(w) exp(-sign w u - u^2 / 2); phi(w) is taken
+            # out so the integrand is at most 1.
+            phi = mpmath.exp(-(w**2) / 2) / mpmath.sqrt(2 * mpmath.pi)
+            return phi * mpmath.quad(lambda u: mpmath.exp(-sign * w * u - u**2 / 2), points)
+
+        cdf = functions._mp_lognorm_cdf(mu, sigma, x)
+        sf = functions._mp_lognorm_sf(mu, sigma, x)
+        # The smaller of F and 1 - F is integrated (the larger one's integrand
+        # peaks far from the breakpoints); the other follows from F + (1 - F) = 1.
+        if w <= 0:
+            assert close(cdf, tail(-1))
+        if w >= 0:
+            assert close(sf, tail(1))
+        assert close(cdf + sf, 1)
+
+
+def test_lognorm_cdf_and_sf_below_the_support():
+    with mpmath.workdps(50):
+        for x in mp(-1e300, -1.0, 0.0):
+            assert functions._mp_lognorm_cdf(mpmath.mpf(0), mpmath.mpf(1), x) == 0
+            assert functions._mp_lognorm_sf(mpmath.mpf(0), mpmath.mpf(1), x) == 1
+
+
+@pytest.mark.parametrize("p", [5e-324, 1e-300, 1e-16, 0.25, 0.5, 0.75, 1 - 1e-10, 1 - 2.0**-53])
+@pytest.mark.parametrize(("mu", "sigma"), [(0.0, 0.25), (-3.0, 0.5), (2.0, 4.0)])
+def test_lognorm_ppf_inverts_the_cdf_and_matches_erfinv(mu, sigma, p):
+    # F(ppf(p)) = p (relative to min(p, 1 - p)), and ppf(p) = exp(mu + sigma
+    # sqrt(2) erfinv(2p - 1)) with 2p - 1 exact at 1200 bits (for p >= 1e-300).
+    with mpmath.workdps(50):
+        mu, sigma, p = mp(mu, sigma, p)
+        x = functions._mp_lognorm_ppf(mu, sigma, p)
+        if p < 0.5:
+            assert close(functions._mp_lognorm_cdf(mu, sigma, x), p)
+        else:
+            assert close(functions._mp_lognorm_sf(mu, sigma, x), 1 - p)
+        if p >= 1e-300:
+            with mpmath.workprec(1200):
+                route = mpmath.exp(mu + sigma * mpmath.sqrt(2) * mpmath.erfinv(2 * p - 1))
+            assert close(x, route)
+        assert functions._mp_lognorm_ppf(mu, sigma, mpmath.mpf(0)) == 0
+
+
+def test_lognorm_ppf_poles_are_tagged_by_rule():
+    assert functions._lognorm_ppf_tags(0.0, 1.0, 1.0) == [POLE]
+    assert functions._lognorm_ppf_tags(0.0, 1.0, 0.0) == []
+    assert functions._lognorm_ppf_tags(0.0, 1.0, 1 - 2.0**-53) == []
+
+
+def test_lognorm_rounding_costs_match_the_tolerance_reasons():
+    # The largest cost of rounding ln x and w at a normal result, in 2^-53.
+    with mpmath.workdps(30):
+        grid = [p for p in functions.LOGNORM_CDF.grid() if p[2] > 0]
+        tiny = mpmath.mpf(2) ** -1022
+        for upper, fn, bound, at in (
+            (False, functions._mp_lognorm_cdf, 3.4e-13, (-3.0, 0.5, -37.5)),
+            (True, functions._mp_lognorm_sf, 3.2e-13, (2.0, 4.0, 37.5)),
+        ):
+            normal = [p for p in grid if fn(*mp(*p)) >= tiny]
+            cost, point = max((functions.lognorm_rounding_cost(*p, upper), p) for p in normal)
+            assert 0.9 * bound < cost * 2.0**-53 < bound < functions.LOGNORM_CDF.tolerance / 2
+            mu, sigma, x = mp(*point)
+            assert point[:2] == at[:2] and close(functions._lognorm_w(mu, sigma, x), at[2], 10)
+
+
+def test_lognorm_ppf_sizes_match_the_tolerance_reason():
+    # |y| = |ln x| and sigma |q| = |ln x - mu| at the normal results.
+    path = Path(__file__).resolve().parent.parent / "data" / "lognorm_ppf.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()[1:]]
+    sizes = [
+        (abs(math.log(y)), abs(math.log(y) - r["in"]["mu"][0]), r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags")
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= y < math.inf
+    ]
+    y_max, q_max, p = max(sizes)
+    assert p == 5e-324 and 151 < y_max < 152 and 153 < q_max < 154
+    assert max(q for _, q, _ in sizes) == q_max
+    assert (152 + 154 * 2.4) * 2.0**-53 < 6e-14 < functions.LOGNORM_PPF.tolerance
+
+
 @pytest.mark.parametrize(
     ("a", "b", "p"),
     [
