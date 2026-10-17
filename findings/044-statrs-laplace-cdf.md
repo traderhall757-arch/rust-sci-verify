@@ -14,8 +14,9 @@
   location -2^1023, scale 2^1023 and x = 2^1023 to 1.75 2^1023 (z = (x -
   location) / scale from 2 to 2.75): `x - self.location` overflows to inf
   although z is moderate, so `cdf` returns exactly 1 and `sf` exactly 0.
-  Off the grid this happens wherever x - location exceeds the largest
-  double (about 1.8e308), for any scale (see the checklist). Every other
+  Off the grid this happens wherever |x - location| exceeds the largest
+  double (about 1.8e308), for any scale (see the checklist); where
+  x - location is below -1.8e308 the results are 0 and 1 instead. Every other
   grid point passes (worst 2.2e-16 for both).
 
 The quantile fails for other reasons: [finding 045](045-statrs-laplace-inverse-cdf.md).
@@ -89,13 +90,16 @@ survival function for the branches and the mirror Q(x) = F(2 mu - x).
    u in [300, 308.2], and b = 10^v, v in [307, 308.2]); x = mu + b z
    rounded to a double, with z uniform in [-40, 40] for half and
    +-10^w for the rest (w uniform in [1.5, 2.9] for a quarter, in
-   [-10, 1.5] for a quarter); mpmath at 50 and 100 digits (they agreed at
+   [-10, 1.5] for a quarter), and x = mu where mu + b z overflows; mpmath at 50 and 100 digits (they agreed at
    all points). `cdf` and `sf` fail none. A second scan
    (`random.Random(20261023)`) aims at the overflow: 2,000 points with
    mu = -10^u, b = 10^v and x = 10^w, u, v and w uniform in
    [307.5, 308.25], 6 significant digits. `cdf` and `sf` each fail 813,
    every one where x - mu overflows (|z| from 1.05 to 10.4), returning
-   exactly 1 and 0.
+   exactly 1 and 0. A third scan (`random.Random(20261024)`) covers the
+   mirror case: 2,000 points with mu = 10^u, b = 10^v and x = -10^w, drawn
+   as in the second. `cdf` and `sf` each fail 819, every one where x - mu
+   overflows to -inf (|z| from 1.05 to 9.42), returning exactly 0 and 1.
 5. **Root cause** (from the source, `src/distribution/laplace.rs`): `cdf`
    and `sf` compute `(-(x - self.location).abs() / self.scale).exp() / 2.`
    and then `1. - y` or `y`. `x - self.location` overflows to inf before
@@ -103,8 +107,9 @@ survival function for the branches and the mirror Q(x) = F(2 mu - x).
    computes z = x / b - mu / b where x - mu overflows (and otherwise
    carries |z| as hi + lo, from an exact TwoSum for x - mu and a fused
    multiply-add for the division's remainder, with y = e^-hi (1 - lo) / 2).
-   This copy passes every grid point and all 40,000 + 4,000 random
-   evaluations (worst 3.1e-16 on the first scan, 1.4e-15 on the second).
+   This copy passes every grid point and all 40,000 + 4,000 + 4,000
+   random evaluations (worst 3.1e-16 on the first scan, 1.4e-15 on the
+   second, 1.3e-15 on the third).
 
 ## Notes
 

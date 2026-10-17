@@ -13,8 +13,8 @@
   1. **Panic at p = 0 and p = 1** (12 grid points, tagged pole: every
      location and scale): `inverse_cdf` panics with the message
      "p must be in [0, 1]" although 0 and 1 are in that range and the
-     quantiles there are -inf and +inf (statrs's own `Gumbel`, `Normal`
-     and `Exp` return the infinity). Conventions: a panic is always crate
+     quantiles there are -inf and +inf (statrs's own `Gumbel` and `Normal`
+     return the infinity). Conventions: a panic is always crate
      wrong.
   2. **b L above the largest double** (1 grid point: location -2^1023,
      scale 2^1023, p = 0.95): `self.scale * (2. - 2. * p).ln()` overflows
