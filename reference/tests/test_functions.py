@@ -7,6 +7,7 @@ identity, a finite sum, or a different mpmath function) where both are valid.
 
 import json
 import math
+from fractions import Fraction
 from pathlib import Path
 
 import mpmath
@@ -1337,6 +1338,137 @@ def test_lognorm_ppf_sizes_match_the_tolerance_reason():
     assert p == 5e-324 and 151 < y_max < 152 and 153 < q_max < 154
     assert max(q for _, q, _ in sizes) == q_max
     assert (152 + 154 * 2.4) * 2.0**-53 < 6e-14 < functions.LOGNORM_PPF.tolerance
+
+
+@pytest.mark.parametrize("alpha", [2.0**-5, 0.5, 1.0, 3.5, 100.0])
+@pytest.mark.parametrize("u", [1.0, 1 + 2.0**-52, 1 + 1e-10, 1.5, 1e5, 1e300])
+def test_pareto_log_is_the_exponential(alpha, u):
+    # log(X / x_m) is exponential with rate alpha: F(x) = expon_cdf(alpha log(x / x_m)).
+    # The log is taken at 1200 bits here, not through _mp_pareto_t.
+    with mpmath.workdps(50):
+        alpha, xm, u = mp(alpha, 2.0**-10, u)
+        x = u * xm
+        with mpmath.workprec(1200):
+            t = alpha * mpmath.log(u)
+        assert close(functions._mp_pareto_cdf(alpha, xm, x), functions._mp_expon_cdf(t))
+        assert close(functions._mp_pareto_sf(alpha, xm, x), functions._mp_expon_sf(t))
+
+
+@pytest.mark.parametrize(
+    ("alpha", "xm", "x"),
+    [(2.0**-5, 2.0**-500, 2.0**-499), (0.1, 1.0, 1 + 1e-10), (0.5, 1024.0, 3000.0),
+     (1.5, 2.0**500, 2.0**501), (3.5, 2.0**-10, 0.01), (10.0, 1.0, 1.2), (100.0, 1.0, 1.001)],
+)  # fmt: skip
+def test_pareto_cdf_and_sf_match_the_integral_of_the_density(alpha, xm, x):
+    # F(x) = integral of f(s) = alpha x_m^alpha / s^(alpha + 1) from x_m to x,
+    # by quadrature in s (no logarithm or power of the ratio involved).
+    with mpmath.workdps(50):
+        alpha, xm, x = mp(alpha, xm, x)
+        integral = mpmath.quad(
+            lambda s: alpha * xm**alpha / s ** (alpha + 1), [xm, (xm + x) / 2, x]
+        )
+        cdf = functions._mp_pareto_cdf(alpha, xm, x)
+        assert close(cdf, integral, digits=35)
+        assert close(cdf + functions._mp_pareto_sf(alpha, xm, x), 1)
+
+
+def test_pareto_far_tail_below_the_smallest_double():
+    # x/x_m = 2^1500: Q = 2^(-1500 alpha) exactly, e.g. 2^-46.875 for alpha = 2^-5.
+    with mpmath.workdps(50):
+        xm, x = mp(2.0**-500, 2.0**1000)
+        for alpha in mp(2.0**-5, 0.1, 0.5):
+            assert close(functions._mp_pareto_sf(alpha, xm, x), mpmath.mpf(2) ** (-1500 * alpha))
+
+
+def test_pareto_cdf_and_sf_below_and_at_the_support_start():
+    with mpmath.workdps(50):
+        xm = mpmath.mpf(2)
+        for alpha in mp(0.1, 2.0, 100.0):
+            for x in mp(-1e300, 0.0, 1.0, 2 * (1 - 2.0**-53)):
+                assert functions._mp_pareto_cdf(alpha, xm, x) == 0
+                assert functions._mp_pareto_sf(alpha, xm, x) == 1
+            assert functions._mp_pareto_cdf(alpha, xm, xm) == 0
+            assert functions._mp_pareto_sf(alpha, xm, xm) == 1
+
+
+def test_pareto_grid_has_exact_standardised_x():
+    # Every x >= x_m is a normal double equal to u x_m with u from _PARETO_U,
+    # so x / x_m is exact as a real number (the tolerance reasons rely on it).
+    grid = functions.PARETO_CDF.grid()
+    assert len(grid) == 1062
+    us = {mpmath.ldexp(mantissa, e) for mantissa, e in functions._PARETO_U}
+    for alpha, xm, x in grid:
+        assert math.frexp(xm)[0] == 0.5  # a power of two
+        if x >= xm:
+            assert 2.0**-1022 <= x < math.inf
+            assert mpmath.mpf(x) / mpmath.mpf(xm) in us
+    # The far-tail points are present where x is finite.
+    assert (2.0**-5, 2.0**-500, 2.0**1000) in grid
+    assert (2.0**-5, 2.0**-10, math.ldexp(1.1, 1020)) in grid
+
+
+@pytest.mark.parametrize("p", [5e-324, 1e-300, 1e-16, 0.25, 0.5, 0.75, 1 - 1e-10, 1 - 2.0**-53])
+@pytest.mark.parametrize(("alpha", "xm"), [(2.0**-5, 2.0**-500), (1.5, 1.0), (100.0, 2.0**500)])
+def test_pareto_ppf_inverts_the_cdf_and_matches_the_power(alpha, xm, p):
+    # F(ppf(p)) = p (relative to min(p, 1 - p)), and ppf(p) = x_m (1 - p)^(-1/alpha)
+    # with 1 - p exact. Both at 1200 bits: for p = 5e-324 the quantile is
+    # x_m (1 + p / alpha), so x - x_m needs about 1100 bits to survive.
+    with mpmath.workprec(1200):
+        alpha, xm, p = mp(alpha, xm, p)
+        x = functions._mp_pareto_ppf(alpha, xm, p)
+        if p < 0.5:
+            assert close(functions._mp_pareto_cdf(alpha, xm, x), p)
+        else:
+            assert close(functions._mp_pareto_sf(alpha, xm, x), 1 - p)
+        route = xm * (1 - p) ** (-1 / alpha)
+    with mpmath.workdps(50):
+        assert close(functions._mp_pareto_ppf(alpha, xm, p), route)
+        assert functions._mp_pareto_ppf(alpha, xm, mpmath.mpf(0)) == xm
+
+
+def test_pareto_ppf_poles_are_tagged_by_rule():
+    assert functions._pareto_ppf_tags(2.0, 1.0, 1.0) == [POLE]
+    assert functions._pareto_ppf_tags(2.0, 1.0, 0.0) == []
+    assert functions._pareto_ppf_tags(2.0, 1.0, 1 - 2.0**-53) == []
+
+
+def test_pareto_condition_numbers_match_the_tolerance_reasons():
+    # cdf: at most 1 in t; sf: t, below 708.4 at every normal result.
+    with mpmath.workdps(30):
+        grid = [(a, s, x) for a, s, x in functions.PARETO_CDF.grid() if x > s]
+        assert max(functions.pareto_cdf_condition_in_t(*p) for p in grid) <= 1
+        normal = [p for p in grid if functions._mp_pareto_sf(*mp(*p)) >= mpmath.mpf(2) ** -1022]
+        worst = max(functions.pareto_sf_condition_in_t(*p) for p in normal)
+        assert 690 < worst < 708.4
+        assert 708.4 * 2.0**-53 < 7.9e-14 < functions.PARETO_SF.tolerance
+
+
+def _one_over_is_exact(a):
+    return Fraction(1) / Fraction(a) == Fraction(1 / a)
+
+
+def test_pareto_ppf_log_size_matches_the_tolerance_reason():
+    # Rounding 1/alpha costs |log(x/x_m)| 2^-53: at most 345.4 2^-53 at a
+    # normal result where 1/alpha is not a double (shape 2^-5 has 1/alpha = 32).
+    path = Path(__file__).resolve().parent.parent / "data" / "pareto_ppf.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()[1:]]
+    logs = [
+        (abs(math.log(y / r["in"]["xm"][0])), r["in"]["alpha"][0], r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags") and not _one_over_is_exact(r["in"]["alpha"][0])
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= y < math.inf
+    ]
+    worst, alpha, p = max(logs)
+    assert (alpha, p) == (0.1, 1 - 1e-15)
+    assert 345.3 < worst < 345.5
+    assert worst * 2.0**-53 < 3.9e-14 < functions.PARETO_PPF.tolerance
+    assert {a for a in functions._PARETO_SHAPES if _one_over_is_exact(a)} == {
+        2.0**-5,
+        0.5,
+        1.0,
+        2.0,
+    }
 
 
 @pytest.mark.parametrize(
