@@ -593,7 +593,8 @@ _Updated at the end of every session. Start here._
   - `pdf` and `ln_pdf` use the same stored power; not checked.
 
 - **Milestone 4, part 23: statrs log-normal distribution** (statrs
-  `LogNormal::cdf`, `sf`, `inverse_cdf`; PR open):
+  `LogNormal::cdf`, `sf`, `inverse_cdf`;
+  [PR #37](https://github.com/traderhall757-arch/rust-sci-verify/pull/37), open):
   - New datasets `lognorm_cdf` and `lognorm_sf` (652 points each: (mu,
     sigma) in {(0, 0.25), (-3, 0.5), (0, 1), (2, 4)} x x = exp(mu + sigma w)
     for w = -40..40 step 0.5, plus x = 0 and -1; tolerance 8e-13, because
