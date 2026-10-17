@@ -1344,7 +1344,9 @@ def test_lognorm_ppf_sizes_match_the_tolerance_reason():
 @pytest.mark.parametrize("u", [1.0, 1 + 2.0**-52, 1 + 1e-10, 1.5, 1e5, 1e300])
 def test_pareto_log_is_the_exponential(alpha, u):
     # log(X / x_m) is exponential with rate alpha: F(x) = expon_cdf(alpha log(x / x_m)).
-    # The log is taken at 1200 bits here, not through _mp_pareto_t.
+    # The log is taken at 1200 bits here, not through _mp_pareto_t. The
+    # exponential uses the same expm1 / exp, so this checks the log only; the
+    # series and quadrature tests below avoid both.
     with mpmath.workdps(50):
         alpha, xm, u = mp(alpha, 2.0**-10, u)
         x = u * xm
@@ -1352,6 +1354,29 @@ def test_pareto_log_is_the_exponential(alpha, u):
             t = alpha * mpmath.log(u)
         assert close(functions._mp_pareto_cdf(alpha, xm, x), functions._mp_expon_cdf(t))
         assert close(functions._mp_pareto_sf(alpha, xm, x), functions._mp_expon_sf(t))
+
+
+_PARETO_GRID = set(functions.PARETO_CDF.grid())
+
+
+@pytest.mark.parametrize("alpha", [2.0**-5, 0.1, 1.0, 3.5, 100.0])
+@pytest.mark.parametrize("d", [2.0**-52, 1e-15, 1e-10, 1e-5])
+def test_pareto_cdf_near_the_scale_matches_the_binomial_series(alpha, d):
+    # x = x_m (1 + d): F = 1 - (1 + d)^-alpha = sum_{k>=1} (-1)^(k+1)
+    # binom(alpha + k - 1, k) d^k, summed exactly term by term (no log or
+    # expm1). Terms fall by a factor of about d (alpha + k) / k, so 40 terms
+    # are far below 1e-40 relative for d <= 1e-5 and alpha <= 100.
+    with mpmath.workdps(60):
+        # The grid's u is the double 1 + d; use its exact distance from 1.
+        alpha, d = mpmath.mpf(alpha), mpmath.mpf(1 + d) - 1
+        xm = mpmath.mpf(2) ** -10
+        x = xm * (1 + d)
+        assert (alpha, float(xm), float(x)) in _PARETO_GRID
+        series = mpmath.fsum(
+            (-1) ** (k + 1) * mpmath.binomial(alpha + k - 1, k) * d**k for k in range(1, 40)
+        )
+    with mpmath.workdps(50):
+        assert close(functions._mp_pareto_cdf(alpha, xm, x), series)
 
 
 @pytest.mark.parametrize(

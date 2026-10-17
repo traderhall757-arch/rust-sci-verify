@@ -15,9 +15,10 @@
   1. **x just above the scale x_m** (`cdf` only, 120 grid points, x / x_m
      from 1 + 2^-52 to 1.001, every shape): 1 - (x_m/x)^alpha subtracts two
      nearly equal numbers, so the absolute error of about 1.1e-16 becomes a
-     relative error of about 1.1e-16 / F(x). Where x_m / x rounds to 1 the
-     result is exactly 0 (15 grid points). Ordinary parameters are hit:
-     with shape 1 and scale 1, `cdf(1.0000000001)` has 9 correct digits.
+     relative error of about 1.1e-16 / F(x). Where (x_m/x)^alpha rounds to
+     1 (shapes 2^-5 and 0.1 next to x_m) the result is exactly 0 (15 grid
+     points). Ordinary parameters are hit: with shape 1 and scale 1,
+     `cdf(1.0000000001)` has about 10 correct digits.
   2. **x_m / x below 2.2e-308** (`sf` 9 points, `cdf` 1; scale 2^-500 with
      x / x_m = 1.1 2^1060, 2^1100 or 2^1500 and shapes 2^-5, 0.1, 0.5): the
      quotient is subnormal (digits lost) or 0, although (x_m/x)^alpha is a
@@ -69,7 +70,7 @@ finding 041.
 | Function (alpha, x_m, x) | Crate | mpmath (true value) | SciPy | Rel. error |
 |---|---|---|---|---|
 | cdf (2^-5, 1, 1.0000000000000002) | 0.0 | 6.9388939039072276e-18 | 0.0 | 1 |
-| cdf (1, 1, 1.0000000001) | 1.000000082740371e-10 | 1.000000082640371e-10 | 1.000000082740371e-10 | 1.0e-9 |
+| cdf (1, 1, 1.0000000001) | 1.000000082740371e-10 | 1.000000082640371e-10 | 1.000000082740371e-10 | 1.0e-10 |
 | cdf (100, 1, 1.00001) | 0.0009994951716614242 | 0.000999495171662341 | 0.0009994951716623124 | 9.2e-13 |
 | cdf (2^-5, 2^-500, 4.149515568880993e180) | 1.0 | 0.9999999999551158 | 1.0 | 4.5e-11 |
 | sf (2^-5, 2^-500, 4.149515568880993e180) | 0.0 | 4.488424239121205e-11 | 0.0 | 1 |
@@ -81,10 +82,13 @@ Second opinion: SciPy (`scipy.stats.pareto`) has the same two weaknesses
 (it is right only in the third row), so every row was also computed by a
 second mpmath route: (x_m/x)^alpha and 1 - (x_m/x)^alpha directly at 1200
 bits, which agree with the table to every printed digit. In
-`reference/tests/test_functions.py` the generator's route is also tested
-against the exponential distribution (log(X / x_m) is exponential with rate
-alpha, logarithm at 1200 bits), quadrature of the density, and the exact
-value 2^(-1500 alpha) at x / x_m = 2^1500.
+`reference/tests/test_functions.py` the generator's route is tested against
+three routes that use neither log nor expm1: the binomial series
+1 - (1 + d)^-alpha = sum of (-1)^(k+1) binom(alpha + k - 1, k) d^k for
+x = x_m (1 + d) with d from 2^-52 to 1e-5 (the rows where statrs returns
+0), quadrature of the density, and the exact value 2^(-1500 alpha) at
+x / x_m = 2^1500. A fourth test (log(X / x_m) is exponential with rate
+alpha) checks only the logarithm, at 1200 bits.
 
 ## Confirmation checklist
 

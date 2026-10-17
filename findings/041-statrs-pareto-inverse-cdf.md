@@ -78,3 +78,9 @@ power and against cdf(ppf(p)) = p.
 1 - p is exact for p >= 1/2, so the overflowing case loses nothing in the
 subtraction. For p below 1/2 statrs's 1 - p is rounded, which costs up to
 2^-53 / alpha in the result (3.6e-15 at shape 2^-5): within the tolerance.
+
+The tolerance reason's bound (345.4 2^-53 = 3.8e-14 for rounding 1/alpha)
+holds for this grid. Off the grid, |log(x / x_m)| can reach about 1,400
+where 1/alpha is not a double, and rounding 1/alpha then costs up to about
+1.6e-13 for any method that uses it: a future off-grid failure of that size
+would not by itself be a bug.
