@@ -647,14 +647,44 @@ _Updated at the end of every session. Start here._
     half the power applied twice) passes every grid and random point.
   - `pdf` and `ln_pdf` not checked.
 
+- **Milestone 4, part 25: statrs Gumbel distribution** (statrs
+  `Gumbel::cdf`, `sf`, `inverse_cdf`;
+  [PR #39](https://github.com/traderhall757-arch/rust-sci-verify/pull/39), open):
+  - New datasets `gumbel_cdf` and `gumbel_sf` (1092 points each: (mu,
+    beta) in (0, 1), (0, 2^-500), (0, 2^500), (-10, 1/4), (100, 8),
+    (-2^1023, 2^1023); x = mu + beta z for z = -7..40 step 1/4 plus far
+    tails and +-2^-30, kept where x is exact, so z is exact) and
+    `gumbel_ppf` (204 points, the gamma_ppf probabilities plus the doubles
+    nearest 1/e and 1/e +- 10^-k, k = 5, 10, 15; p = 0 and 1 tagged
+    `pole`, 15 results tagged `overflow`). Tolerance 1e-13. Reference
+    exp(-w), -expm1(-w) with w = exp(-z), and mu - beta log(-log p),
+    tested against quadrature of the density, the upper-tail series and
+    the root of cdf(x) = p at 1200 bits. SciPy is wrong at the same points
+    as statrs.
+  - `cdf` and `sf` fail 4 of 1092 each: **finding 042** (high, narrow
+    range), approved by Claude after the checklist: x - mu overflows when
+    both are near the largest double (cdf 1 instead of 0.87). Off the grid
+    `cdf` also loses up to 3.2e-13 in the far lower tail from rounding z
+    once (noted in the finding, not counted as a bug).
+  - `inverse_cdf` fails 20 of 204: **finding 043** (high), approved by
+    Claude after the checklist: log(-log p) cancels next to p = 1/e (0
+    instead of 3.4e-17; 3.8e-13 off at scale 10, p = 0.3679), and beta
+    log(-log p) overflows although the quantile is finite.
+  - Random scans (seeds 20261020 and 20261021): all failures from these
+    causes, except 2 quantile points where mu - beta L itself cancels
+    (any method that rounds L loses there); a copy with remedies passes
+    every grid and random point otherwise.
+  - `pdf` and `ln_pdf` not checked.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 24, statrs
-   `Pareto`, findings 040 and 041).
+1. **Owner: review and merge the open PR** (Milestone 4 part 25, statrs
+   `Gumbel`, findings 042 and 043).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Closed-form statrs distributions:** `Gumbel`, `Laplace`, `Cauchy`, `Levy` (look for finding
-     023's `1 - exp(..)` and finding 040's `1 - pow(..)`). Each needs small new datasets; suggested next, as
-     it needs no exact discrete distributions.
+   - **Closed-form statrs distributions:** `Laplace`, `Cauchy`, `Levy` (look for finding
+     023's `1 - exp(..)`, finding 040's `1 - pow(..)` and finding 043's cancellation next to a
+     quantile's zero). Each needs small new datasets; suggested next, as it needs no exact
+     discrete distributions.
    - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and
      asymptotic), `ks_onesample` / two-sample (exact distributions),
      `fishers_exact` (hypergeometric sums), `anderson_darling` (its p-value
@@ -723,7 +753,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
