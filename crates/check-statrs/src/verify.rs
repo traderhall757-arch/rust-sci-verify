@@ -4,7 +4,7 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 
 use crate::expected;
 use statrs::distribution::{
-    Beta, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, InverseGamma,
+    Beta, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, Gumbel, InverseGamma,
     LogNormal, Normal, Pareto, StudentsT, Weibull,
 };
 use statrs::function::{beta, erf, gamma};
@@ -97,6 +97,12 @@ fn lognormal(mu: f64, sigma: f64) -> LogNormal {
 /// shape `alpha`; statrs takes the scale first.
 fn pareto(alpha: f64, xm: f64) -> Pareto {
     Pareto::new(xm, alpha).expect("valid parameters")
+}
+
+/// The Gumbel distribution with location `mu` and scale `beta` (a power of two
+/// in the data).
+fn gumbel(mu: f64, beta: f64) -> Gumbel {
+    Gumbel::new(mu, beta).expect("valid parameters")
 }
 
 /// The exponential distribution with rate 1 (the reference data's).
@@ -577,6 +583,35 @@ fn statrs_matches_reference() {
         }
         .run(|p| {
             Outcome::scalar(pareto(p.scalar("alpha"), p.scalar("xm")).inverse_cdf(p.scalar("p")))
+        }),
+        Check {
+            function: "statrs::distribution::Gumbel::cdf",
+            dataset: "gumbel_cdf",
+            expected: &[Expected {
+                finding: "042-statrs-gumbel-cdf",
+                points: expected::GUMBEL_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(gumbel(p.scalar("mu"), p.scalar("beta")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Gumbel::sf",
+            dataset: "gumbel_sf",
+            expected: &[Expected {
+                finding: "042-statrs-gumbel-cdf",
+                points: expected::GUMBEL_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(gumbel(p.scalar("mu"), p.scalar("beta")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Gumbel::inverse_cdf",
+            dataset: "gumbel_ppf",
+            expected: &[Expected {
+                finding: "043-statrs-gumbel-inverse-cdf",
+                points: expected::GUMBEL_PPF,
+            }],
+        }
+        .run(|p| {
+            Outcome::scalar(gumbel(p.scalar("mu"), p.scalar("beta")).inverse_cdf(p.scalar("p")))
         }),
         Check {
             function: "statrs::distribution::LogNormal::cdf",
