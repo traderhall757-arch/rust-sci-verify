@@ -5,26 +5,19 @@
 - **Severity:** high (silently wrong answers: with location -2^1023 and
   scale 2^1023, `cdf(2^1023)` is 1 instead of 0.873 and `sf(2^1023)` is 0
   instead of 0.127), in a narrow range: location and x of opposite sign,
-  both near the largest double. Off the grid also a small accuracy loss
-  (up to 3.2e-13) in the far lower tail of `cdf`
+  both near the largest double
 - **Status:** approved (Claude, checklist complete, 2026-10-16)
 - **Affected inputs:** 4 of 1092 points of `reference/data/gumbel_cdf.jsonl`
   and 4 of 1092 of `reference/data/gumbel_sf.jsonl` (tolerance 1e-13). The
   exact lists are `GUMBEL_CDF` and `GUMBEL_SF` in
   `crates/check-statrs/src/expected.rs`, the report is
-  [reports/statrs-0.19.1.md](../reports/statrs-0.19.1.md). Two causes:
-  1. **x - mu above the largest double** (grid: mu = -2^1023, beta =
-     2^1023, z = (x - mu) / beta = 2, 2.25, 2.5 and 2.75): the difference
-     overflows to inf although z is moderate, so `cdf` returns exactly 1
-     and `sf` exactly 0. Every other grid point passes (worst 4.8e-14 for
-     `cdf`, 2.2e-16 for `sf`).
-  2. **Rounding z in the steep lower tail** (off the grid only; the grid
-     makes z exact on purpose, see Notes): F = exp(-exp(-z)) has condition
-     number |z| exp(-z) in z, up to about 4,600 where F is still a normal
-     number, so rounding (x - mu) / beta once costs up to about 5e-13.
-     Seen at 102 of 20,000 random points, all with z from -6.55 to -5.22
-     (F from 1.5e-305 to 9.7e-81), worst 3.1e-13; for example
-     `Gumbel::new(0.0, 0.001)` gives `cdf(-0.0065)` 3.2e-13 off.
+  [reports/statrs-0.19.1.md](../reports/statrs-0.19.1.md). The cause: for
+  mu = -2^1023, beta = 2^1023 and z = (x - mu) / beta = 2, 2.25, 2.5 and
+  2.75, x - mu is above the largest double and overflows to inf although z
+  is moderate, so `cdf` returns exactly 1 and `sf` exactly 0. Every other
+  grid point passes (worst 4.8e-14 for `cdf`, 2.2e-16 for `sf`). A smaller,
+  off-grid accuracy loss in the far lower tail of `cdf` is not counted as
+  part of this finding (see Notes).
 
 `Gumbel::inverse_cdf` fails elsewhere: [finding 043](043-statrs-gumbel-inverse-cdf.md).
 
@@ -99,18 +92,18 @@ the exponential distribution of exp(-Z).
    v in [307, 308.2]); x = mu + beta z rounded to a double, with z uniform
    in [-7, 40] for half, 10^w (w uniform in [1.5, 3]) for a quarter and
    -10^w (w uniform in [-10, 0.85]) for a quarter; mpmath at 50 and 100
-   digits (they agreed at all points). `cdf` fails 102 (cause 2, see
-   above); `sf` fails none (worst 7.7e-14). A second scan
-   (`random.Random(20261021)`) aims at cause 1: 2,000 points with
+   digits (they agreed at all points). `cdf` fails 102, all from rounding
+   z in the far lower tail (see Notes); `sf` fails none (worst 7.7e-14).
+   A second scan (`random.Random(20261021)`) aims at the overflow: 2,000 points with
    mu = -10^u, beta = 10^v and x = 10^w, u, v and w uniform in
    [307.5, 308.25], 6 significant digits. `cdf` and `sf` each fail 831,
    every one where x - mu overflows (z from 1.08 to 9.57), returning
    exactly 1 and 0.
 5. **Root cause** (from the source, `src/distribution/gumbel.rs`): `cdf`
    computes `(-(-(x - self.location) / self.scale).exp()).exp()` and `sf`
-   `-(-(-(x - self.location) / self.scale).exp()).exp_m1()`. Cause 1 is
-   `x - self.location` overflowing before the division brings it back;
-   cause 2 is that the subtraction and the division each round z.
+   `-(-(-(x - self.location) / self.scale).exp()).exp_m1()`. The cause is
+   `x - self.location` overflowing before the division brings it back
+   (the subtraction and the division also each round z: see Notes).
    Confirmed with a copy that computes z = x / beta - mu / beta where
    x - mu overflows, and otherwise carries z as z_hi + z_lo (an exact
    TwoSum for x - mu and a fused multiply-add for the division's
@@ -124,9 +117,14 @@ the exponential distribution of exp(-Z).
 
 The grid's scales are powers of two and every x is mu + beta z exactly,
 so z carries no rounding and the tolerance judges the evaluation alone
-(the tolerance reason relies on this). Off the grid, cause 2 is an
-accuracy loss rather than a wrong answer: a method that rounds z once
-loses up to |z| exp(-z) 2^-53, about 5e-13, in the far lower tail, and only
-a method that keeps z's rounding error (as the copy above does) stays
-within the tolerance there. It is listed so that a fix covers it, and it
-does not by itself raise the severity.
+(the tolerance reason relies on this). Off the grid, statrs rounds z = (x -
+mu) / beta, and F = exp(-exp(-z)) has condition number |z| exp(-z) in z, up
+to about 4,600 where F is still a normal number, so any method that rounds
+z once loses up to about 5e-13 in the far lower tail. The random scan saw
+this at 102 of 20,000 points, all with z from -6.55 to -5.22 (F from
+1.5e-305 to 9.7e-81), worst 3.1e-13; for example `Gumbel::new(0.0, 0.001)`
+gives `cdf(-0.0065)` 3.2e-13 off. Only a method that keeps z's rounding
+error (as the copy above does) stays within 1e-13 there. As in finding 041
+and finding 043, such a loss from rounding an intermediate once would not
+by itself be a bug, so it is not counted in this finding; a fix may still
+take it along.

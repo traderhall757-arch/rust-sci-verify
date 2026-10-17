@@ -2374,9 +2374,11 @@ GUMBEL_CDF = Spec(
         "x, mu and beta are exact doubles, beta is a power of two and x - mu = beta z with z "
         "a double, so z = (x - mu) / beta is exact. F = exp(-w) with w = exp(-z) has "
         "condition number w in w, at most 708.4 at a normal result, so rounding w once costs "
-        "up to 7.9e-14 there (as for weibull_sf), and the outer exp adds an ulp. 1e-13 as for "
-        "the other functions; results below 2.2e-308 are judged relative to that number "
-        "(conventions)"
+        "up to 7.9e-14 there (as for weibull_sf), and the outer exp adds an ulp. This assumes "
+        "an exp within about half an ulp (as glibc's is); one good only to 1 ulp could lose "
+        "about 1.5e-13 at the grid's worst point (w = 665), which would not by itself be a "
+        "bug. 1e-13 as for the other functions; results below 2.2e-308 are judged relative "
+        "to that number (conventions)"
     ),
     grid_description=(
         f"{_GUMBEL_X_DESCRIPTION}; F is subnormal from about z = -6.56, 0 below about "
