@@ -2072,6 +2072,186 @@ LOGNORM_PPF = Spec(
     input_tags=_lognorm_ppf_tags,
 )
 
+# --- Pareto distribution (shape alpha, scale x_m) -------------------------------
+
+# F(x) = 1 - (x_m/x)^alpha for x >= x_m. Scales are powers of two and every
+# grid x is u x_m with u a double or a power of two times one, so x/x_m is
+# exact as a real number (it need not be a double: u = 2^1100 is not).
+# Shape 2^-5 makes 1/alpha = 32 exact, so its quantile carries no rounding of
+# the exponent; its quantile at x_m = 2^-500 is moderate although
+# (1 - p)^(-1/alpha) overflows.
+_PARETO_SHAPES = (2.0**-5, 0.1, 0.5, 1.0, 1.5, 2.0, 3.5, 10.0, 100.0)
+_PARETO_SCALE_EXPONENTS = (-500, -10, 0, 10, 500)
+# u = x/x_m as (mantissa, power of two): just above the support start, where
+# 1 - (x_m/x)^alpha cancels; the bulk; and far tails, where x_m/x is subnormal
+# (1.1 2^-1030, 1.1 2^-1060) or below the smallest double (2^-1100, 2^-1500)
+# while (x_m/x)^alpha is not for small shapes.
+_PARETO_U = tuple((u, 0) for u in (
+    1.0, 1 + 2.0**-52, 1 + 1e-15, 1 + 1e-10, 1 + 1e-5, 1.001, 1.1, 1.5, 2.0, 5.0, 10.0, 100.0,
+    1e5, 1e10, 1e20, 1e50, 1e100, 1e200, 1e300,
+)) + ((1.1, 1030), (1.1, 1060), (1.0, 1100), (1.0, 1500))  # fmt: skip
+
+
+def _pareto_x_grid() -> list[tuple[float, float, float]]:
+    # x = ldexp(mantissa, e) x_m, kept where x is normal and finite (then x/x_m
+    # is exactly mantissa 2^e). Below the support: x = x_m (1 - 2^-53), x_m/2,
+    # 0 and -x_m.
+    points = set()
+    for alpha in _PARETO_SHAPES:
+        for m in _PARETO_SCALE_EXPONENTS:
+            xm = math.ldexp(1.0, m)
+            below = (xm * (1 - 2.0**-53), xm / 2, 0.0, -xm)
+            points.update((alpha, xm, x) for x in below)
+            for mantissa, e in _PARETO_U:
+                # frexp's exponent: mantissa 2^(m + e) is below 2^top (ldexp raises past 2^1024).
+                top = math.frexp(mantissa)[1] + m + e
+                x = math.ldexp(mantissa, m + e) if top <= 1024 else math.inf
+                if 2.0**-1022 <= x < math.inf:
+                    points.add((alpha, xm, x))
+    return sorted(points)
+
+
+def _mp_pareto_t(alpha: mpmath.mpf, xm: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    # alpha log(x/x_m) with 60 extra bits; mpmath.log keeps full relative
+    # precision for x/x_m just above 1 (x/x_m - 1 is exact at this precision).
+    with mpmath.extraprec(60):
+        return alpha * mpmath.log(x / xm)
+
+
+def _mp_pareto_cdf(alpha: mpmath.mpf, xm: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = -expm1(-alpha log(x/x_m)), 0 for x < x_m; mpmath.expm1 keeps full
+    relative precision for x just above x_m."""
+    return -mpmath.expm1(-_mp_pareto_t(alpha, xm, x)) if x >= xm else mpmath.mpf(0)
+
+
+def _mp_pareto_sf(alpha: mpmath.mpf, xm: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """1 - F(x) = (x_m/x)^alpha = exp(-alpha log(x/x_m)), 1 for x < x_m."""
+    return mpmath.exp(-_mp_pareto_t(alpha, xm, x)) if x >= xm else mpmath.mpf(1)
+
+
+def pareto_cdf_condition_in_t(alpha: float, xm: float, x: float) -> mpmath.mpf:
+    """|t dF/dt / F| = t / (e^t - 1) at t = alpha log(x/x_m) > 0: at most 1."""
+    t = _mp_pareto_t(mpmath.mpf(alpha), mpmath.mpf(xm), mpmath.mpf(x))
+    return t / mpmath.expm1(t)
+
+
+def pareto_sf_condition_in_t(alpha: float, xm: float, x: float) -> mpmath.mpf:
+    """|t dQ/dt / Q| = t at t = alpha log(x/x_m)."""
+    return _mp_pareto_t(mpmath.mpf(alpha), mpmath.mpf(xm), mpmath.mpf(x))
+
+
+def _pareto_ppf_grid() -> list[tuple[float, float, float]]:
+    ps = sorted({p for _, p in _gamma_ppf_grid()})
+    return [
+        (alpha, math.ldexp(1.0, m), p)
+        for alpha in _PARETO_SHAPES
+        for m in _PARETO_SCALE_EXPONENTS
+        for p in ps
+    ]
+
+
+def _pareto_ppf_tags(alpha: float, xm: float, p: float) -> list[str]:
+    # The quantile is +inf at p = 1. At p = 0 it is x_m, the start of the
+    # support: a finite value, so not a pole.
+    return [POLE] if p == 1.0 else []
+
+
+def _mp_pareto_ppf(alpha: mpmath.mpf, xm: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """x = x_m exp(-log1p(-p) / alpha); -p is exact and mpmath.log1p keeps full
+    relative precision for tiny p."""
+    with mpmath.extraprec(60):
+        return xm * mpmath.exp(-mpmath.log1p(-p) / alpha)
+
+
+_PARETO_PARAMETERS_DESCRIPTION = (
+    "shape alpha in {2^-5, 0.1, 0.5, 1, 1.5, 2, 3.5, 10, 100} x scale x_m = 2^m for m in "
+    "{-500, -10, 0, 10, 500}"
+)
+_PARETO_X_DESCRIPTION = (
+    f"{_PARETO_PARAMETERS_DESCRIPTION} x x = u x_m for u in {{1, 1 + 2^-52, 1 + 1e-15, "
+    "1 + 1e-10, 1 + 1e-5, 1.001, 1.1, 1.5, 2, 5, 10, 100, 1e5, 1e10, 1e20, 1e50, 1e100, "
+    "1e200, 1e300, 1.1 2^1030, 1.1 2^1060, 2^1100, 2^1500}, kept where x is normal and "
+    "finite (so x/x_m = u exactly as a real number), plus x = x_m (1 - 2^-53), x_m/2, 0 "
+    "and -x_m below the support"
+)
+
+PARETO_CDF = Spec(
+    name="pareto_cdf",
+    description=(
+        "Pareto distribution cumulative distribution function 1 - (x_m/x)^alpha "
+        "(shape alpha, scale x_m)"
+    ),
+    inputs=("alpha", "xm", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x, alpha and x_m are exact doubles and x_m is a power of two, so x/x_m is exact "
+        "(where it is a double; otherwise log x - log x_m is within an ulp of log(x/x_m) "
+        "relative, as no cancellation occurs there) and x/x_m - 1 is exact for x/x_m <= 2; "
+        "t = alpha log1p(x/x_m - 1) is then within a few ulps, and -expm1(-t) adds an ulp. "
+        "The condition number in t, t / (e^t - 1), is at most 1, so a careful method loses "
+        "a few ulps at most. 1e-13 as for the other functions; results below 2.2e-308 are "
+        "judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_PARETO_X_DESCRIPTION}; F is 0 for x < x_m and rounds to 1 above about t = 37.4 "
+        "with t = alpha log(x/x_m)"
+    ),
+    grid=_pareto_x_grid,
+    mpmath_fn=_mp_pareto_cdf,
+    scipy_name="scipy.stats.pareto.cdf",
+    scipy_fn=lambda alpha, xm, x: st.pareto.cdf(x, alpha, scale=xm),
+)
+
+PARETO_SF = Spec(
+    name="pareto_sf",
+    description="Pareto distribution survival function (x_m/x)^alpha (shape alpha, scale x_m)",
+    inputs=("alpha", "xm", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x, alpha and x_m are exact doubles and x_m is a power of two. The condition number "
+        "in t = alpha log(x/x_m) is t itself, 708.4 at the last normal result, so rounding "
+        "t once costs up to 7.9e-14 there (as for weibull_sf); where x_m/x is a normal "
+        "double, pow(x_m/x, alpha) costs only alpha ulps (at most 100, 1.1e-14) plus one. "
+        "Results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"the pareto_cdf grid: {_PARETO_X_DESCRIPTION}; Q is 1 for x < x_m, subnormal from "
+        "about t = 708.40 and 0 above about t = 745.13 with t = alpha log(x/x_m)"
+    ),
+    grid=_pareto_x_grid,
+    mpmath_fn=_mp_pareto_sf,
+    scipy_name="scipy.stats.pareto.sf",
+    scipy_fn=lambda alpha, xm, x: st.pareto.sf(x, alpha, scale=xm),
+)
+
+PARETO_PPF = Spec(
+    name="pareto_ppf",
+    description="Pareto distribution quantile function x_m (1 - p)^(-1/alpha)",
+    inputs=("alpha", "xm", "p"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "p is an exact double; 1 - p is exact for p >= 1/2, and below that rounding it costs "
+        "at most 2^-53 / alpha (3.6e-15 for alpha = 2^-5) in the result. x_m (1 - p)^(-1/alpha) "
+        "is then one pow, within an ulp or so, and multiplying by x_m (a power of two) is "
+        "exact. 1/alpha is exact for alpha in {2^-5, 0.5, 1, 2}; for the other shapes "
+        "rounding it costs |log(x/x_m)| 2^-53, at most 345.4 2^-53 = 3.8e-14 at a normal "
+        "result on this grid (alpha = 0.1, p = 1 - 1e-15). 1e-13 as for the other functions; "
+        "results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_PARETO_PARAMETERS_DESCRIPTION} x the gamma_ppf probabilities: p = 0, 5e-324, "
+        "1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, "
+        "1/2 - 1e-10, 1/2, 1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, 0.99, 0.999, 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15 and 1; the quantile is x_m at p = 0 (the start of the "
+        "support) and p = 1 is tagged pole (+inf)"
+    ),
+    grid=_pareto_ppf_grid,
+    mpmath_fn=_mp_pareto_ppf,
+    scipy_name="scipy.stats.pareto.ppf",
+    scipy_fn=lambda alpha, xm, p: st.pareto.ppf(p, alpha, scale=xm),
+    input_tags=_pareto_ppf_tags,
+)
+
 # --- hypothesis tests: one-sample t-test --------------------------------------
 
 # Deterministic samples x_i = loc + z_i with z_i = ((7919 i) mod 1000 - 500) / 1000
@@ -3210,6 +3390,7 @@ ALL: tuple[Spec, ...] = (
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
     INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, CHI_CDF, CHI_SF, CHI_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
     WEIBULL_CDF, WEIBULL_SF, WEIBULL_PPF, LOGNORM_CDF, LOGNORM_SF, LOGNORM_PPF,
+    PARETO_CDF, PARETO_SF, PARETO_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     SKEWTEST,
     F_CDF, F_SF, F_PPF,

@@ -594,7 +594,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 23: statrs log-normal distribution** (statrs
   `LogNormal::cdf`, `sf`, `inverse_cdf`;
-  [PR #37](https://github.com/traderhall757-arch/rust-sci-verify/pull/37), open):
+  [PR #37](https://github.com/traderhall757-arch/rust-sci-verify/pull/37), merged):
   - New datasets `lognorm_cdf` and `lognorm_sf` (652 points each: (mu,
     sigma) in {(0, 0.25), (-3, 0.5), (0, 1), (2, 4)} x x = exp(mu + sigma w)
     for w = -40..40 step 0.5, plus x = 0 and -1; tolerance 8e-13, because
@@ -617,13 +617,43 @@ _Updated at the end of every session. Start here._
     `_mp_erfcx` now include the three log-normal ones (a guardrail test's
     expected list, listed under "Checks changed").
 
+- **Milestone 4, part 24: statrs Pareto distribution** (statrs
+  `Pareto::cdf`, `sf`, `inverse_cdf`;
+  [PR #38](https://github.com/traderhall757-arch/rust-sci-verify/pull/38), open):
+  - New datasets `pareto_cdf` and `pareto_sf` (1062 points each: shapes
+    2^-5, 0.1 to 100 x scales 2^-500, 2^-10, 1, 2^10, 2^500, x = u x_m with
+    u from 1 + 2^-52 to 1e300 plus 1.1 2^1030, 1.1 2^1060, 2^1100 and
+    2^1500 where x is finite, plus four points below the support) and
+    `pareto_ppf` (1215 points, the gamma_ppf probabilities; p = 1 tagged
+    `pole`, 10 results tagged `overflow`). Tolerance 1e-13. Scales are
+    powers of two, so x / x_m is exact; shape 2^-5 makes 1/alpha = 32
+    exact. Reference -expm1(-t), exp(-t) with t = alpha log(x / x_m), and
+    x_m exp(-log1p(-p) / alpha), tested against the binomial series near
+    the scale, quadrature of the density, the exact far tail and
+    cdf(ppf(p)) = p (no log or expm1 in these); the exponential test checks
+    the log only. SciPy is also wrong at 119 cdf, 18 sf and 1 ppf points
+    (the same two causes as statrs).
+  - `cdf` fails 121 and `sf` 9 of 1062: **finding 040** (high), approved by
+    Claude after the checklist. Cause 1 (cdf): 1 - (x_m/x)^alpha cancels
+    just above the scale (0 instead of 6.9e-18; about 10 digits at shape 1,
+    scale 1, x = 1 + 1e-10). Cause 2: x_m / x is subnormal or 0 although the
+    answer is moderate for shapes below 1 (sf 0 instead of 4.5e-11).
+  - `inverse_cdf` fails 1 of 1215: **finding 041** (high, narrow range),
+    approved by Claude after the checklist: (1 - p)^(-1/alpha) overflows
+    for shapes below about 0.05 although x_m times it is finite.
+  - Random scan (seed 20261019, 40,000 points, scales not powers of two):
+    cdf 7,937, sf 989, inverse_cdf 44 failures, all from these causes; a
+    copy with remedies (log1p of the exact x - x_m, scaling x_m by 2^1000,
+    half the power applied twice) passes every grid and random point.
+  - `pdf` and `ln_pdf` not checked.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 23, statrs
-   `LogNormal`, finding 039).
+1. **Owner: review and merge the open PR** (Milestone 4 part 24, statrs
+   `Pareto`, findings 040 and 041).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Closed-form statrs distributions:** `Pareto`, `Gumbel`, `Laplace`, `Cauchy`, `Levy` (look for finding
-     023's `1 - exp(..)`). Each needs small new datasets; suggested next, as
+   - **Closed-form statrs distributions:** `Gumbel`, `Laplace`, `Cauchy`, `Levy` (look for finding
+     023's `1 - exp(..)` and finding 040's `1 - pow(..)`). Each needs small new datasets; suggested next, as
      it needs no exact discrete distributions.
    - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and
      asymptotic), `ks_onesample` / two-sample (exact distributions),
