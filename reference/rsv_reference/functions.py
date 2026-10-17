@@ -1916,6 +1916,160 @@ WEIBULL_PPF = Spec(
     input_tags=_weibull_ppf_tags,
 )
 
+# --- log-normal distribution (location mu, scale sigma) ------------------------
+
+# F(x) = Phi((ln x - mu) / sigma) for x > 0. The grid puts w = (ln x - mu) /
+# sigma on the norm_cdf steps, so both tails reach complete underflow; mu and
+# sigma pairs cover a narrow, a shifted and a wide distribution, keeping
+# |ln x| below 160 (x stays a normal double).
+_LOGNORM_PARAMETERS = ((0.0, 0.25), (-3.0, 0.5), (0.0, 1.0), (2.0, 4.0))
+
+
+def _lognorm_x_grid() -> list[tuple[float, float, float]]:
+    # x = the double nearest exp(mu + sigma w) for w = -40..40 step 0.5, plus
+    # x = 0 and x = -1 (below the support).
+    points = set()
+    for mu, sigma in _LOGNORM_PARAMETERS:
+        points.update({(mu, sigma, 0.0), (mu, sigma, -1.0)})
+        for i in range(-80, 81):
+            with mpmath.workdps(40):
+                x = float(mpmath.exp(mu + sigma * mpmath.mpf(i) / 2))
+            points.add((mu, sigma, x))
+    return sorted(points)
+
+
+def _lognorm_w(mu: mpmath.mpf, sigma: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    # (ln x - mu) / sigma with 60 extra bits, so rounding it costs nothing at the
+    # working precision.
+    with mpmath.extraprec(60):
+        return (mpmath.log(x) - mu) / sigma
+
+
+def _mp_lognorm_cdf(mu: mpmath.mpf, sigma: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = Phi((ln x - mu) / sigma), 0 for x <= 0."""
+    return _mp_norm_cdf(_lognorm_w(mu, sigma, x)) if x > 0 else mpmath.mpf(0)
+
+
+def _mp_lognorm_sf(mu: mpmath.mpf, sigma: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """1 - F(x) = Phi(-(ln x - mu) / sigma), 1 for x <= 0."""
+    return _mp_norm_sf(_lognorm_w(mu, sigma, x)) if x > 0 else mpmath.mpf(1)
+
+
+def lognorm_rounding_cost(mu: float, sigma: float, x: float, upper: bool) -> mpmath.mpf:
+    """Relative change of F (upper: of 1 - F) when ln x and w = (ln x - mu) / sigma
+    are each rounded to a double: the condition number in w, phi(w) / Phi(+-w),
+    times |ln x| / sigma + |w|, in units of 2^-53."""
+    mu, sigma, x = mpmath.mpf(mu), mpmath.mpf(sigma), mpmath.mpf(x)
+    w = _lognorm_w(mu, sigma, x)
+    tail = _mp_norm_sf(w) if upper else _mp_norm_cdf(w)
+    return mpmath.npdf(w) / tail * (abs(mpmath.log(x)) / sigma + abs(w))
+
+
+def _lognorm_ppf_grid() -> list[tuple[float, float, float]]:
+    ps = [p for (p,) in _norm_ppf_grid()]
+    return [(mu, sigma, p) for mu, sigma in _LOGNORM_PARAMETERS for p in ps]
+
+
+def _lognorm_ppf_tags(mu: float, sigma: float, p: float) -> list[str]:
+    # The quantile is +inf at p = 1. At p = 0 it is 0, the end of the support:
+    # a finite value, so not a pole.
+    return [POLE] if p == 1.0 else []
+
+
+def _mp_lognorm_ppf(mu: mpmath.mpf, sigma: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """x = exp(mu + sigma Phi^-1(p)), 0 at p = 0."""
+    if p == 0:
+        return mpmath.mpf(0)
+    with mpmath.extraprec(60):
+        return mpmath.exp(mu + sigma * _mp_norm_ppf(p))
+
+
+_LOGNORM_PARAMETERS_DESCRIPTION = "(mu, sigma) in {(0, 0.25), (-3, 0.5), (0, 1), (2, 4)}"
+_LOGNORM_X_DESCRIPTION = (
+    f"{_LOGNORM_PARAMETERS_DESCRIPTION} x x = the double nearest exp(mu + sigma w) for "
+    "w = -40..40 step 0.5, plus x = 0 and x = -1"
+)
+
+LOGNORM_CDF = Spec(
+    name="lognorm_cdf",
+    description=(
+        "Log-normal distribution cumulative distribution function Phi((ln x - mu) / sigma) "
+        "(location mu, scale sigma)"
+    ),
+    inputs=("mu", "sigma", "x"),
+    tolerance=8e-13,
+    tolerance_reason=(
+        "x is an exact double but ln x is not: rounding ln x costs |ln x| 2^-53 in w = "
+        "(ln x - mu) / sigma after dividing by sigma, and rounding w costs |w| 2^-53. Phi's "
+        "condition number in w, phi(w) / Phi(w), is about |w| in the lower tail, so a method "
+        "that rounds ln x and w loses (|ln x| / sigma + |w|) phi(w) / Phi(w) 2^-53, at most "
+        "3.4e-13 at a normal result on this grid (mu = -3, sigma = 0.5, w = -37.5); 8e-13 "
+        "allows about 2x that, as norm_cdf does. SciPy flushes the subnormal result at "
+        "w = -38 to 0. Results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_LOGNORM_X_DESCRIPTION}; F is 0 for x <= 0, subnormal from about w = -37.52, 0 "
+        "below about w = -38.49 and rounds to 1 above about w = 8.3"
+    ),
+    grid=_lognorm_x_grid,
+    mpmath_fn=_mp_lognorm_cdf,
+    scipy_name="scipy.stats.lognorm.cdf",
+    scipy_fn=lambda mu, sigma, x: st.lognorm.cdf(x, sigma, scale=math.exp(mu)),
+)
+
+LOGNORM_SF = Spec(
+    name="lognorm_sf",
+    description=(
+        "Log-normal distribution survival function Phi(-(ln x - mu) / sigma) "
+        "(location mu, scale sigma)"
+    ),
+    inputs=("mu", "sigma", "x"),
+    tolerance=8e-13,
+    tolerance_reason=(
+        "The reasoning of lognorm_cdf mirrored: rounding ln x and w = (ln x - mu) / sigma "
+        "costs (|ln x| / sigma + |w|) phi(w) / Phi(-w) 2^-53, about |w| (|ln x| / sigma + "
+        "|w|) 2^-53 in the upper tail, at most 3.2e-13 at a normal result on this grid "
+        "(mu = 2, sigma = 4, w = 37.5); 8e-13 as for lognorm_cdf. SciPy flushes the subnormal "
+        "result at w = 38 to 0. Results below 2.2e-308 are judged relative to that number "
+        "(conventions)"
+    ),
+    grid_description=(
+        f"the lognorm_cdf grid: {_LOGNORM_X_DESCRIPTION}; 1 - F is 1 for x <= 0, subnormal "
+        "from about w = 37.52, 0 above about w = 38.49 and rounds to 1 below about w = -8.3"
+    ),
+    grid=_lognorm_x_grid,
+    mpmath_fn=_mp_lognorm_sf,
+    scipy_name="scipy.stats.lognorm.sf",
+    scipy_fn=lambda mu, sigma, x: st.lognorm.sf(x, sigma, scale=math.exp(mu)),
+)
+
+LOGNORM_PPF = Spec(
+    name="lognorm_ppf",
+    description="Log-normal distribution quantile function exp(mu + sigma Phi^-1(p))",
+    inputs=("mu", "sigma", "p"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "The quantile is exp(y) with y = mu + sigma Phi^-1(p), so an absolute error in y is "
+        "the relative error of the result. Rounding y costs |y| 2^-53, and a normal quantile "
+        "q good to a few ulps (norm_ppf: within 2^-53 x 2.4 for statrs and SciPy) costs "
+        "sigma |q| times that; |y| and sigma |q| are at most 152 and 154 on this grid "
+        "(mu = 2, sigma = 4, p = 5e-324), so a careful method stays within about 6e-14. "
+        "1e-13 as for the other quantiles; results below 2.2e-308 are judged relative to "
+        "that number (conventions)"
+    ),
+    grid_description=(
+        f"{_LOGNORM_PARAMETERS_DESCRIPTION} x the norm_ppf probabilities: p = 10^-k for "
+        "k = 1..20 and 30..300 step 10, the doubles nearest 1 - 10^-k for k = 1..16, i/64 for "
+        "i = 0..64, 1/2 +- 10^-k for k = 5, 10, 15, and 5e-324, 1e-310, 2^-1022; the "
+        "quantile is 0 at p = 0 (the end of the support) and p = 1 is tagged pole (+inf)"
+    ),
+    grid=_lognorm_ppf_grid,
+    mpmath_fn=_mp_lognorm_ppf,
+    scipy_name="scipy.stats.lognorm.ppf",
+    scipy_fn=lambda mu, sigma, p: st.lognorm.ppf(p, sigma, scale=math.exp(mu)),
+    input_tags=_lognorm_ppf_tags,
+)
+
 # --- hypothesis tests: one-sample t-test --------------------------------------
 
 # Deterministic samples x_i = loc + z_i with z_i = ((7919 i) mod 1000 - 500) / 1000
@@ -3053,7 +3207,7 @@ ALL: tuple[Spec, ...] = (
     YV_LARGE, JV, JV_LARGE, IV, IV_LARGE, IV_NONINT, NORM_CDF, NORM_SF, NORM_PPF,
     T_CDF, T_SF, T_PPF, GAMMA_CDF, GAMMA_SF, GAMMA_PPF,
     INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, CHI_CDF, CHI_SF, CHI_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
-    WEIBULL_CDF, WEIBULL_SF, WEIBULL_PPF,
+    WEIBULL_CDF, WEIBULL_SF, WEIBULL_PPF, LOGNORM_CDF, LOGNORM_SF, LOGNORM_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     SKEWTEST,
     F_CDF, F_SF, F_PPF,

@@ -1222,6 +1222,106 @@ def test_weibull_ppf_rounding_of_one_over_k_matches_the_tolerance_reason():
     assert worst * 2.0**-53 < 8.3e-14 < functions.WEIBULL_PPF.tolerance
 
 
+@pytest.mark.parametrize(("mu", "sigma"), [(0.0, 0.25), (-3.0, 0.5), (0.0, 1.0), (2.0, 4.0)])
+def test_lognorm_cdf_and_sf_match_mpmath_ncdf(mu, sigma):
+    # mpmath.ncdf is an independent route to Phi (it does not go through
+    # _mp_erfc); every grid point of the parameter pair is compared.
+    with mpmath.workdps(50):
+        for m, s, x in functions.LOGNORM_CDF.grid():
+            if (m, s) != (mu, sigma) or x <= 0:
+                continue
+            m, s, x = mp(m, s, x)
+            w = (mpmath.log(x) - m) / s
+            assert close(functions._mp_lognorm_cdf(m, s, x), mpmath.ncdf(w))
+            assert close(functions._mp_lognorm_sf(m, s, x), mpmath.ncdf(-w))
+
+
+@pytest.mark.parametrize(
+    ("mu", "sigma", "x"),
+    [(0.0, 0.25, 0.5), (-3.0, 0.5, 1e-3), (0.0, 1.0, 1.0), (0.0, 1.0, 7.0), (2.0, 4.0, 1e-20)],
+)
+def test_lognorm_cdf_matches_the_integral_of_the_density(mu, sigma, x):
+    # F(x) = integral of f(s) = phi((ln s - mu) / sigma) / (s sigma) from 0 to
+    # x; with s = exp(mu + sigma (w - u)), w = (ln x - mu) / sigma, the
+    # integrand is phi(w - u) for u from 0 to infinity. Quadrature gives 35 or
+    # more digits here, so 30 are compared.
+    with mpmath.workdps(50):
+        mu, sigma, x = mp(mu, sigma, x)
+        w = (mpmath.log(x) - mu) / sigma
+        integral = mpmath.quad(
+            lambda u: mpmath.exp(-((w - u) ** 2) / 2) / mpmath.sqrt(2 * mpmath.pi),
+            [0, 0.5, 2, 8, mpmath.inf],
+        )
+        cdf = functions._mp_lognorm_cdf(mu, sigma, x)
+        assert close(cdf, integral, 30)
+        assert close(cdf + functions._mp_lognorm_sf(mu, sigma, x), 1)
+
+
+def test_lognorm_cdf_and_sf_below_the_support():
+    with mpmath.workdps(50):
+        for x in mp(-1e300, -1.0, 0.0):
+            assert functions._mp_lognorm_cdf(mpmath.mpf(0), mpmath.mpf(1), x) == 0
+            assert functions._mp_lognorm_sf(mpmath.mpf(0), mpmath.mpf(1), x) == 1
+
+
+@pytest.mark.parametrize("p", [5e-324, 1e-300, 1e-16, 0.25, 0.5, 0.75, 1 - 1e-10, 1 - 2.0**-53])
+@pytest.mark.parametrize(("mu", "sigma"), [(0.0, 0.25), (-3.0, 0.5), (2.0, 4.0)])
+def test_lognorm_ppf_inverts_the_cdf_and_matches_erfinv(mu, sigma, p):
+    # F(ppf(p)) = p (relative to min(p, 1 - p)), and ppf(p) = exp(mu + sigma
+    # sqrt(2) erfinv(2p - 1)) with 2p - 1 exact at 1200 bits (for p >= 1e-300).
+    with mpmath.workdps(50):
+        mu, sigma, p = mp(mu, sigma, p)
+        x = functions._mp_lognorm_ppf(mu, sigma, p)
+        if p < 0.5:
+            assert close(functions._mp_lognorm_cdf(mu, sigma, x), p)
+        else:
+            assert close(functions._mp_lognorm_sf(mu, sigma, x), 1 - p)
+        if p >= 1e-300:
+            with mpmath.workprec(1200):
+                route = mpmath.exp(mu + sigma * mpmath.sqrt(2) * mpmath.erfinv(2 * p - 1))
+            assert close(x, route)
+        assert functions._mp_lognorm_ppf(mu, sigma, mpmath.mpf(0)) == 0
+
+
+def test_lognorm_ppf_poles_are_tagged_by_rule():
+    assert functions._lognorm_ppf_tags(0.0, 1.0, 1.0) == [POLE]
+    assert functions._lognorm_ppf_tags(0.0, 1.0, 0.0) == []
+    assert functions._lognorm_ppf_tags(0.0, 1.0, 1 - 2.0**-53) == []
+
+
+def test_lognorm_rounding_costs_match_the_tolerance_reasons():
+    # The largest cost of rounding ln x and w at a normal result, in 2^-53.
+    with mpmath.workdps(30):
+        grid = [p for p in functions.LOGNORM_CDF.grid() if p[2] > 0]
+        tiny = mpmath.mpf(2) ** -1022
+        for upper, fn, bound, at in (
+            (False, functions._mp_lognorm_cdf, 3.4e-13, (-3.0, 0.5, -37.5)),
+            (True, functions._mp_lognorm_sf, 3.2e-13, (2.0, 4.0, 37.5)),
+        ):
+            normal = [p for p in grid if fn(*mp(*p)) >= tiny]
+            cost, point = max((functions.lognorm_rounding_cost(*p, upper), p) for p in normal)
+            assert 0.9 * bound < cost * 2.0**-53 < bound < functions.LOGNORM_CDF.tolerance / 2
+            mu, sigma, x = mp(*point)
+            assert point[:2] == at[:2] and close(functions._lognorm_w(mu, sigma, x), at[2], 10)
+
+
+def test_lognorm_ppf_sizes_match_the_tolerance_reason():
+    # |y| = |ln x| and sigma |q| = |ln x - mu| at the normal results.
+    path = Path(__file__).resolve().parent.parent / "data" / "lognorm_ppf.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()[1:]]
+    sizes = [
+        (abs(math.log(y)), abs(math.log(y) - r["in"]["mu"][0]), r["in"]["p"][0])
+        for r in rows
+        if not r.get("tags")
+        for y in [float(r["mpmath"]["y"][0])]
+        if 2.0**-1022 <= y < math.inf
+    ]
+    y_max, q_max, p = max(sizes)
+    assert p == 5e-324 and 151 < y_max < 152 and 153 < q_max < 154
+    assert max(q for _, q, _ in sizes) == q_max
+    assert (152 + 154 * 2.4) * 2.0**-53 < 6e-14 < functions.LOGNORM_PPF.tolerance
+
+
 @pytest.mark.parametrize(
     ("a", "b", "p"),
     [

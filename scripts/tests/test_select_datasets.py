@@ -235,7 +235,7 @@ def test_real_file_one_spec_or_one_helper():
     head = REAL.replace("costs up to x^2 * 2^-53", "costs at most x^2 * 2^-53", 1)
     assert head != REAL
     assert regenerated(selection(head, REAL)) == ["erfcx"]
-    # erfc and the normal distribution are computed from _mp_erfcx.
+    # erfc and the normal and log-normal distributions are computed from _mp_erfcx.
     head = REAL.replace("def _mp_erfcx(x: mpmath.mpf)", "def _mp_erfcx(x: mpmath.mpf, _unused=0)")
     assert regenerated(selection(head, REAL)) == [
         "erfcx",
@@ -243,6 +243,9 @@ def test_real_file_one_spec_or_one_helper():
         "norm_cdf",
         "norm_sf",
         "norm_ppf",
+        "lognorm_cdf",
+        "lognorm_sf",
+        "lognorm_ppf",
     ]
     head = REAL.replace("range(-300, 301, 10)", "range(-300, 301, 20)")
     used = regenerated(selection(head, REAL))
