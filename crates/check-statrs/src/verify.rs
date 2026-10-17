@@ -4,8 +4,8 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 
 use crate::expected;
 use statrs::distribution::{
-    Beta, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, Gumbel, InverseGamma,
-    Laplace, LogNormal, Normal, Pareto, StudentsT, Weibull,
+    Beta, Cauchy, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, Gumbel,
+    InverseGamma, Laplace, LogNormal, Normal, Pareto, StudentsT, Weibull,
 };
 use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
@@ -109,6 +109,12 @@ fn gumbel(mu: f64, beta: f64) -> Gumbel {
 /// the data).
 fn laplace(mu: f64, b: f64) -> Laplace {
     Laplace::new(mu, b).expect("valid parameters")
+}
+
+/// The Cauchy distribution with location `mu` and scale `b` (a power of two in
+/// the data).
+fn cauchy(mu: f64, b: f64) -> Cauchy {
+    Cauchy::new(mu, b).expect("valid parameters")
 }
 
 /// The exponential distribution with rate 1 (the reference data's).
@@ -648,6 +654,33 @@ fn statrs_matches_reference() {
         .run(|p| {
             Outcome::scalar(laplace(p.scalar("mu"), p.scalar("b")).inverse_cdf(p.scalar("p")))
         }),
+        Check {
+            function: "statrs::distribution::Cauchy::cdf",
+            dataset: "cauchy_cdf",
+            expected: &[Expected {
+                finding: "046-statrs-cauchy-cdf",
+                points: expected::CAUCHY_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(cauchy(p.scalar("mu"), p.scalar("b")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Cauchy::sf",
+            dataset: "cauchy_sf",
+            expected: &[Expected {
+                finding: "046-statrs-cauchy-cdf",
+                points: expected::CAUCHY_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(cauchy(p.scalar("mu"), p.scalar("b")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Cauchy::inverse_cdf",
+            dataset: "cauchy_ppf",
+            expected: &[Expected {
+                finding: "047-statrs-cauchy-inverse-cdf",
+                points: expected::CAUCHY_PPF,
+            }],
+        }
+        .run(|p| Outcome::scalar(cauchy(p.scalar("mu"), p.scalar("b")).inverse_cdf(p.scalar("p")))),
         Check {
             function: "statrs::distribution::LogNormal::cdf",
             dataset: "lognorm_cdf",

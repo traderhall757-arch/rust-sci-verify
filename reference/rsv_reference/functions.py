@@ -2607,6 +2607,178 @@ LAPLACE_PPF = Spec(
     input_tags=_laplace_ppf_tags,
 )
 
+# --- Cauchy distribution (location mu, scale b) ---------------------------------
+
+# F(x) = 1/2 + atan(z) / pi with z = (x - mu) / b. The Gumbel pairs, for the
+# same reasons: scales are powers of two and every grid x is mu + b z exactly,
+# so z is exact; the last pair puts x - mu above the largest double although z
+# is moderate.
+_CAUCHY_PARAMETERS = _GUMBEL_PARAMETERS
+# z: the bulk in steps of 1/4 on both sides; both heavy tails, where the smaller
+# of F and Q is about 1 / (pi |z|) (so 1/2 + atan(z) / pi loses about log10 |z|
+# digits, and all of them from about |z| = 1e16), down to subnormal from about
+# |z| = 1.4e307; and points next to 0.
+_CAUCHY_Z = tuple(
+    sorted(
+        {i / 4 for i in range(-160, 161)}
+        | {
+            s * t
+            for s in (-1, 1)
+            for t in (50.0, 100.0, 1e3, 1e4, 1e5, 1e8, 1e10, 1e15, 1e16, 1e17, 1e20, 1e50, 1e100,
+                      1e300, 1e305, 1e308, 2.0**-30, 2.0**-60)
+        }
+    )
+)  # fmt: skip
+
+
+def _cauchy_x_grid() -> list[tuple[float, float, float]]:
+    # x = mu + b z, kept where it is an exact, finite double that is 0 or normal.
+    points = []
+    for mu, b in _CAUCHY_PARAMETERS:
+        for z in _CAUCHY_Z:
+            # 2200 bits hold mu + b z exactly for every double on this grid.
+            with mpmath.workprec(2200):
+                exact = mpmath.mpf(mu) + mpmath.mpf(b) * mpmath.mpf(z)
+                if abs(exact) >= mpmath.mpf(2) ** 1024:
+                    continue
+                x = float(exact)
+                if mpmath.mpf(x) == exact and (x == 0 or abs(x) >= 2.0**-1022):
+                    points.append((mu, b, x))
+    return sorted(points)
+
+
+def _mp_cauchy_cdf(mu: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = acot(-z) / pi for z < 0 and 1 - acot(z) / pi for z >= 0 (the same as
+    1/2 + atan(z) / pi, without its cancellation in the lower tail; for z >= 0 the
+    result is at least 1/2, so the subtraction does not cancel)."""
+    with mpmath.extraprec(60):
+        z = (x - mu) / b
+        return mpmath.acot(-z) / mpmath.pi if z < 0 else 1 - mpmath.acot(z) / mpmath.pi
+
+
+def _mp_cauchy_sf(mu: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """Q(x) = F(mu - (x - mu)): the distribution is symmetric about mu."""
+    with mpmath.extraprec(60):
+        return _mp_cauchy_cdf(mu, b, 2 * mu - x)
+
+
+def _cauchy_ppf_grid() -> list[tuple[float, float, float]]:
+    # The gamma_ppf probabilities, the doubles next to 1/2 (where the quantile is
+    # mu + b tan(pi d) with d tiny) and p = 1/8 and 7/8 (tan = -+(1 + sqrt 2), so
+    # with the last pair b tan overflows although the quantile at 7/8 is finite).
+    ps = sorted({p for _, p in _gamma_ppf_grid()} | {0.5 - 2.0**-54, 0.5 + 2.0**-53, 0.125, 0.875})
+    return [(mu, b, p) for mu, b in _CAUCHY_PARAMETERS for p in ps]
+
+
+def _cauchy_ppf_tags(mu: float, b: float, p: float) -> list[str]:
+    # The quantile is -inf at p = 0 and +inf at p = 1.
+    return [POLE] if p in (0.0, 1.0) else []
+
+
+def _mp_cauchy_ppf(mu: mpmath.mpf, b: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """x = mu + b tan(pi (p - 1/2)) = mu - b cospi(p) / sinpi(p): no subtraction from p
+    (mpmath reduces the arguments of sinpi and cospi exactly, so both are accurate
+    next to 0 and 1, and cospi(1/2) is exactly 0)."""
+    with mpmath.extraprec(60):
+        return mu - b * mpmath.cospi(p) / mpmath.sinpi(p)
+
+
+def cauchy_ppf_cancellation(mu: float, b: float, p: float) -> mpmath.mpf:
+    """(|mu| + |b T|) / |mu + b T| with b T the quantile's tangent part: the ulps
+    that adding mu to a rounded b T can cost."""
+    m = mpmath.mpf(mu)
+    x = _mp_cauchy_ppf(m, mpmath.mpf(b), mpmath.mpf(p))
+    return (abs(m) + abs(x - m)) / abs(x)
+
+
+_CAUCHY_PARAMETERS_DESCRIPTION = (
+    "(mu, b) in {(0, 1), (0, 2^-500), (0, 2^500), (-10, 1/4), (100, 8), (-2^1023, 2^1023)}"
+)
+_CAUCHY_X_DESCRIPTION = (
+    f"{_CAUCHY_PARAMETERS_DESCRIPTION} x x = mu + b z for z = -40..40 step 1/4, "
+    "z = +-{50, 100, 1e3, 1e4, 1e5, 1e8, 1e10, 1e15, 1e16, 1e17, 1e20, 1e50, 1e100, 1e300, "
+    "1e305, 1e308} and z = +-2^-30, +-2^-60, kept where x is an exact, finite double that is "
+    "0 or normal (so z = (x - mu) / b is exact)"
+)
+
+CAUCHY_CDF = Spec(
+    name="cauchy_cdf",
+    description=(
+        "Cauchy distribution cumulative distribution function 1/2 + atan(z) / pi, "
+        "z = (x - mu) / b (location mu, scale b)"
+    ),
+    inputs=("mu", "b", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x, mu and b are exact doubles, b is a power of two and x - mu = b z with z a double, "
+        "so z is exact; F's condition number in z, |z F'(z) / F(z)|, is at most 1, so a careful "
+        "method (acot(-z) / pi for z < 0, 1 - acot(z) / pi for z >= 0) is within a few ulps. "
+        "1e-13 as for the other functions; results below 2.2e-308 are judged relative to that "
+        "number (conventions)"
+    ),
+    grid_description=(
+        f"{_CAUCHY_X_DESCRIPTION}; F is about 1 / (pi |z|) in the lower tail (subnormal from "
+        "about z = -1.4e307) and rounds to 1 above about z = 5.7e15"
+    ),
+    grid=_cauchy_x_grid,
+    mpmath_fn=_mp_cauchy_cdf,
+    scipy_name="scipy.stats.cauchy.cdf",
+    scipy_fn=lambda mu, b, x: st.cauchy.cdf(x, loc=mu, scale=b),
+)
+
+CAUCHY_SF = Spec(
+    name="cauchy_sf",
+    description=(
+        "Cauchy distribution survival function 1/2 - atan(z) / pi, z = (x - mu) / b "
+        "(location mu, scale b)"
+    ),
+    inputs=("mu", "b", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "the mirror image of cauchy_cdf (Q(x) = F(2 mu - x)), with the same exact z and the "
+        "same conditioning. 1e-13 as for the other functions; results below 2.2e-308 are "
+        "judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"the cauchy_cdf grid: {_CAUCHY_X_DESCRIPTION}; Q rounds to 1 below about "
+        "z = -5.7e15 and is about 1 / (pi z) in the upper tail (subnormal from about "
+        "z = 1.4e307)"
+    ),
+    grid=_cauchy_x_grid,
+    mpmath_fn=_mp_cauchy_sf,
+    scipy_name="scipy.stats.cauchy.sf",
+    scipy_fn=lambda mu, b, x: st.cauchy.sf(x, loc=mu, scale=b),
+)
+
+CAUCHY_PPF = Spec(
+    name="cauchy_ppf",
+    description="Cauchy distribution quantile function mu + b tan(pi (p - 1/2))",
+    inputs=("mu", "b", "p"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "p is an exact double; a careful method forms T = tan(pi (p - 1/2)) within a few ulps "
+        "(tan(pi d) with d = p - 1/2 exact (Sterbenz) for 1/4 <= p <= 3/4, -cot(pi p) below "
+        "and cot(pi (1 - p)) above, 1 - p exact), and exactly -1, 0 and 1 at p = 1/4, 1/2 and "
+        "3/4; then mu + b T costs (|mu| + |b T|) / |mu + b T| ulps, at most about 8.8 on this "
+        "grid where the quantile is not 0 (mu = -10, b = 1/4, p = 0.99; tested), 1e-15, and "
+        "nothing where it is 0 (mu = -b, p = 3/4: T = 1 exactly). 1e-13 as for the other "
+        "quantiles"
+    ),
+    grid_description=(
+        f"{_CAUCHY_PARAMETERS_DESCRIPTION} x the gamma_ppf probabilities (p = 0, 5e-324, "
+        "1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, "
+        "1/2 - 1e-10, 1/2, 1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, 0.99, 0.999, 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15 and 1), the doubles next to 1/2 (1/2 - 2^-54, 1/2 + 2^-53) and "
+        "p = 1/8, 7/8; p = 0 and 1 are tagged pole (-inf and +inf), quantiles beyond the "
+        "largest double are tagged overflow"
+    ),
+    grid=_cauchy_ppf_grid,
+    mpmath_fn=_mp_cauchy_ppf,
+    scipy_name="scipy.stats.cauchy.ppf",
+    scipy_fn=lambda mu, b, p: st.cauchy.ppf(p, loc=mu, scale=b),
+    input_tags=_cauchy_ppf_tags,
+)
+
 # --- hypothesis tests: one-sample t-test --------------------------------------
 
 # Deterministic samples x_i = loc + z_i with z_i = ((7919 i) mod 1000 - 500) / 1000
@@ -3747,6 +3919,7 @@ ALL: tuple[Spec, ...] = (
     WEIBULL_CDF, WEIBULL_SF, WEIBULL_PPF, LOGNORM_CDF, LOGNORM_SF, LOGNORM_PPF,
     PARETO_CDF, PARETO_SF, PARETO_PPF,
     GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF, LAPLACE_CDF, LAPLACE_SF, LAPLACE_PPF,
+    CAUCHY_CDF, CAUCHY_SF, CAUCHY_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     SKEWTEST,
     F_CDF, F_SF, F_PPF,

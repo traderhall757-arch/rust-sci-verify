@@ -678,7 +678,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 26: statrs Laplace distribution** (statrs
   `Laplace::cdf`, `sf`, `inverse_cdf`;
-  [PR #40](https://github.com/traderhall757-arch/rust-sci-verify/pull/40), open):
+  [PR #40](https://github.com/traderhall757-arch/rust-sci-verify/pull/40), merged):
   - New datasets `laplace_cdf` and `laplace_sf` (1828 points each: the
     Gumbel (mu, b) pairs x x = mu + b z for z = -40..40 step 1/4, both far
     tails to +-1e300 and +-2^-30, +-2^-60, kept where x is exact) and
@@ -699,14 +699,40 @@ _Updated at the end of every session. Start here._
     causes; a copy with remedies passes every grid and random point.
   - `pdf` and `ln_pdf` not checked.
 
+- **Milestone 4, part 27: statrs Cauchy distribution** (statrs
+  `Cauchy::cdf`, `sf`, `inverse_cdf`;
+  [PR #41](https://github.com/traderhall757-arch/rust-sci-verify/pull/41), open):
+  - New datasets `cauchy_cdf` and `cauchy_sf` (1762 points each: the
+    Gumbel (mu, b) pairs x x = mu + b z for z = -40..40 step 1/4, both
+    heavy tails to +-1e308 (subnormal results) and +-2^-30, +-2^-60, kept
+    where x is exact) and `cauchy_ppf` (186 points, the gamma_ppf
+    probabilities plus the doubles next to 1/2 and p = 1/8, 7/8; p = 0 and
+    1 tagged `pole`, 25 `overflow`). Tolerance 1e-13. Reference acot(-z) /
+    pi and 1 - acot(z) / pi, and mu - b cospi(p) / sinpi(p), tested
+    against quadrature of the density, the acot series and the root of
+    cdf(x) = p at 1200 bits. SciPy is right in the tails, wrong at the
+    overflow points.
+  - `cdf` and `sf` fail 56 of 1762 each: **finding 046** (high), approved
+    by Claude after the checklist: atan(z) / pi + 0.5 cancels in the tail
+    (0 instead of 3.2e-17 at z = -1e16; 2e-7 off at z = -1e10), and
+    x - mu overflows (finding 044's cause).
+  - `inverse_cdf` fails 62 of 186: **finding 047** (high), approved by
+    Claude after the checklist: finite at p = 0 and 1 (-1.6e16 b), rounding
+    of pi (p - 1/2) next to 0 and 1 (every p below 2^-54 gives the p = 0
+    value; 5e-7 off at p = 1e-10), tan(pi / 4) != 1 (nonzero where the
+    quantile is 0), and b tan overflowing although the quantile is finite.
+  - Random scans (seeds 20261025 to 20261027): all failures from these
+    causes; a copy with remedies passes every grid and random point.
+  - `pdf` and `ln_pdf` not checked.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 26, statrs
-   `Laplace`, findings 044 and 045).
+1. **Owner: review and merge the open PR** (Milestone 4 part 27, statrs
+   `Cauchy`, findings 046 and 047).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Closed-form statrs distributions:** `Cauchy`, then `Levy` (look for finding
-     023's `1 - exp(..)`, finding 040's `1 - pow(..)` and finding 043's cancellation next to a
-     quantile's zero). Each needs small new datasets; suggested next, as it needs no exact
+   - **Closed-form statrs distributions:** `Levy` (look for finding 046's `0.5 + atan`
+     cancellation in an erfc form, finding 047's rounded-argument tails and finding 044's
+     x - mu overflow). Needs small new datasets; suggested next, as it needs no exact
      discrete distributions.
    - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and
      asymptotic), `ks_onesample` / two-sample (exact distributions),
@@ -731,7 +757,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 045 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 047 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
