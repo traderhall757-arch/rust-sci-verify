@@ -627,9 +627,10 @@ _Updated at the end of every session. Start here._
     `pole`, 10 results tagged `overflow`). Tolerance 1e-13. Scales are
     powers of two, so x / x_m is exact; shape 2^-5 makes 1/alpha = 32
     exact. Reference -expm1(-t), exp(-t) with t = alpha log(x / x_m), and
-    x_m exp(-log1p(-p) / alpha), tested against the exponential (log(X /
-    x_m) has rate alpha), quadrature of the density, the exact far tail and
-    cdf(ppf(p)) = p. SciPy is also wrong at 119 cdf, 18 sf and 1 ppf points
+    x_m exp(-log1p(-p) / alpha), tested against the binomial series near
+    the scale, quadrature of the density, the exact far tail and
+    cdf(ppf(p)) = p (no log or expm1 in these); the exponential test checks
+    the log only. SciPy is also wrong at 119 cdf, 18 sf and 1 ppf points
     (the same two causes as statrs).
   - `cdf` fails 121 and `sf` 9 of 1062: **finding 040** (high), approved by
     Claude after the checklist. Cause 1 (cdf): 1 - (x_m/x)^alpha cancels
