@@ -1744,6 +1744,123 @@ def test_laplace_ppf_cancellation_matches_the_tolerance_reason():
         assert 14 * 2.0**-53 < 1.6e-15 < functions.LAPLACE_PPF.tolerance
 
 
+_CAUCHY_GRID = set(functions.CAUCHY_CDF.grid())
+
+
+@pytest.mark.parametrize(
+    ("mu", "b", "x"),
+    [(0.0, 1.0, -1e308), (0.0, 1.0, -1e16), (0.0, 1.0, -40.0), (0.0, 1.0, -3.0),
+     (0.0, 1.0, -(2.0**-60)), (0.0, 1.0, 0.0), (0.0, 1.0, 2.0**-30), (0.0, 1.0, 2.5),
+     (0.0, 1.0, 1e5), (0.0, 2.0**-500, -(2.0**-500) * 1e305), (-10.0, 0.25, -10.5),
+     (100.0, 8.0, 140.0), (-_BIG, _BIG, -0.75 * _BIG), (-_BIG, _BIG, _BIG),
+     (-_BIG, _BIG, 1.75 * _BIG)],
+)  # fmt: skip
+def test_cauchy_cdf_and_sf_match_the_integral_of_the_density(mu, b, x):
+    # F = integral of 1 / (pi (1 + t^2)) dt from -inf to z = (x - mu) / b and Q
+    # the same from z to inf, by quadrature (no arctangent involved). The
+    # substitution t = 1 / u maps the tail beyond |z| >= 1 to (0, 1 / |z|], where
+    # the integrand 1 / (pi (1 + u^2)) is smooth; the rest is integrated in t.
+    with mpmath.workdps(50):
+        mu, b, x = mp(mu, b, x)
+        assert (float(mu), float(b), float(x)) in _CAUCHY_GRID
+        z = (x - mu) / b
+
+        def density(t):
+            return 1 / (mpmath.pi * (1 + t**2))
+
+        def tail(a):
+            # integral from a >= 0 to inf.
+            if a >= 1:
+                # u = s / a, so the integral over s in [0, 1] is near 1 / pi
+                # (quad stops at an absolute error of about 10^-50).
+                return mpmath.quad(lambda s: density(s / a), [0, 1]) / a
+            return mpmath.quad(density, [a, 1]) + mpmath.quad(density, [0, 1])
+
+        lower = tail(-z) if z <= 0 else 1 - tail(z)
+        upper = tail(z) if z >= 0 else 1 - tail(-z)
+        assert close(functions._mp_cauchy_cdf(mu, b, x), lower, digits=30)
+        assert close(functions._mp_cauchy_sf(mu, b, x), upper, digits=30)
+
+
+def test_cauchy_cdf_tail_matches_its_series():
+    # For z > 1, Q(z) = F(-z) = (1 / pi) (1/z - 1/(3 z^3) + 1/(5 z^5) - ...),
+    # the series of acot; checks the branches and the mirror, not acot itself.
+    with mpmath.workdps(50):
+        for z in (1e3, 1e16, 1e100, 1e308):
+            zz = mpmath.mpf(z)
+            q = sum((-1) ** k / ((2 * k + 1) * zz ** (2 * k + 1)) for k in range(40))
+            q /= mpmath.pi
+            assert close(functions._mp_cauchy_sf(*mp(0.0, 1.0, z)), q)
+            assert close(functions._mp_cauchy_cdf(*mp(0.0, 1.0, -z)), q)
+            assert close(functions._mp_cauchy_cdf(*mp(0.0, 1.0, z)), 1 - q)
+
+
+def test_cauchy_grid_has_exact_standardised_x():
+    # Every x is mu + b z with b a power of two and z from _CAUCHY_Z, so
+    # z = (x - mu) / b is exact (the tolerance reasons rely on it).
+    grid = functions.CAUCHY_CDF.grid()
+    assert len(grid) == 1762
+    zs = {mpmath.mpf(z) for z in functions._CAUCHY_Z}
+    with mpmath.workprec(2200):
+        for mu, b, x in grid:
+            assert math.frexp(b)[0] == 0.5
+            assert x == 0 or 2.0**-1022 <= abs(x) < math.inf
+            assert (mpmath.mpf(x) - mu) / b in zs
+    # The points where x - mu exceeds the largest double although z is 2 to 2.75.
+    big = [x for mu, _, x in grid if mu == -_BIG and x - _BIG / 2 >= _BIG / 2]
+    assert big == [_BIG, 1.25 * _BIG, 1.5 * _BIG, 1.75 * _BIG]
+
+
+def test_cauchy_ppf_matches_the_root_of_the_cdf():
+    # The quantile solves F(x) = p: found here by the secant method at 1200 bits
+    # from the cdf (acot, no tangent), starting next to the route's value.
+    for mu, b in [(0.0, 1.0), (100.0, 8.0), (-_BIG, _BIG)]:
+        for p in (5e-324, 1e-300, 1e-5, 0.125, 0.5 - 2.0**-54, 0.5 + 2.0**-53, 0.875, 1 - 1e-15):
+            with mpmath.workdps(50):
+                route = functions._mp_cauchy_ppf(*mp(mu, b, p))
+            with mpmath.workprec(1200):
+                m, bb, q = mp(mu, b, p)
+                start = route * (1 + mpmath.mpf(10) ** -30) + bb * mpmath.mpf(10) ** -30
+                root = mpmath.findroot(
+                    lambda x, m=m, bb=bb, q=q: functions._mp_cauchy_cdf(m, bb, x) - q,
+                    (route, start),
+                )
+            with mpmath.workdps(50):
+                assert close(route, root)
+    # Exactly the location at p = 1/2.
+    assert functions._mp_cauchy_ppf(*mp(100.0, 8.0, 0.5)) == 100
+
+
+def test_cauchy_ppf_poles_are_tagged_by_rule():
+    assert functions._cauchy_ppf_tags(0.0, 1.0, 0.0) == [POLE]
+    assert functions._cauchy_ppf_tags(0.0, 1.0, 1.0) == [POLE]
+    assert functions._cauchy_ppf_tags(0.0, 1.0, 5e-324) == []
+    assert functions._cauchy_ppf_tags(0.0, 1.0, 1 - 2.0**-53) == []
+
+
+def test_cauchy_ppf_cancellation_matches_the_tolerance_reason():
+    # mu + b T costs (|mu| + |b T|) / |mu + b T| ulps: at most about 8.8 at a
+    # finite, nonzero, untagged quantile on this grid. The quantile is 0 only
+    # where mu = 0, p = 1/2 (T = 0) and mu = -b, p = 3/4 (T = 1).
+    with mpmath.workdps(30):
+        ratios, zeros = [], []
+        for mu, b, p in functions.CAUCHY_PPF.grid():
+            if functions._cauchy_ppf_tags(mu, b, p):
+                continue
+            x = functions._mp_cauchy_ppf(*mp(mu, b, p))
+            if x == 0:
+                zeros.append((mu, b, p))
+            elif abs(x) < mpmath.mpf(2) ** 1024:
+                ratios.append((functions.cauchy_ppf_cancellation(mu, b, p), mu, b, p))
+        assert sorted(zeros) == [
+            (-_BIG, _BIG, 0.75), (0.0, 2.0**-500, 0.5), (0.0, 1.0, 0.5), (0.0, 2.0**500, 0.5)
+        ]  # fmt: skip
+        worst, mu, b, p = max(ratios)
+        assert (mu, b, p) == (-10.0, 0.25, 0.99)
+        assert 8.7 < worst < 8.8
+        assert 8.8 * 2.0**-53 < 1e-15 < functions.CAUCHY_PPF.tolerance
+
+
 @pytest.mark.parametrize(
     ("a", "b", "p"),
     [
