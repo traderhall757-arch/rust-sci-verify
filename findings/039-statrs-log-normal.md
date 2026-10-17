@@ -16,7 +16,7 @@
   (mu, sigma) pairs; `sf` is the mirror image. |w| <= 0.5 passes, and so do
   the subnormal and zero results beyond w = -37.5 (relative to 2.2e-308).
   The quantile `inverse_cdf` is **not** affected: it passes all 548 untagged
-  points of `lognorm_ppf` (worst 3.4e-14, tolerance 1e-13).
+  points of `lognorm_ppf` (worst 3.3e-14 as the report rounds it, tolerance 1e-13).
 
 ## Reproduction
 
@@ -57,18 +57,23 @@ with mpmath to 2.9e-14 or better at every row (second opinion).
    shown).
 2. **Arbiter checked**: the generator requires mpmath at 50 and 100 digits to
    round to the same double. The route Phi((ln x - mu) / sigma) through
-   `_mp_erfc` is tested against `mpmath.ncdf` at every grid point, against
-   quadrature of the density, and cdf + sf = 1, in
-   `reference/tests/test_functions.py`.
+   `_mp_erfc` is tested against direct quadrature of the density for the
+   smaller tail (no erfc involved; 9 points out to |w| = 37.5, both tails,
+   agreement to 47 digits or more) and cdf + sf = 1, in
+   `reference/tests/test_functions.py`. A second test compares every grid
+   point with `mpmath.ncdf`; that only checks the wiring (ln x, mu, sigma,
+   the sign of w), because `ncdf` uses the same erfc formula for w < 0.
 3. **Second opinion**: SciPy within tolerance at every row of "Expected".
 4. **Off-grid**: 20,000 points with mu uniform in [-5, 5], sigma log-uniform
    in [0.1, 5] and w uniform in [-38.5, 38.5], x = exp(mu + sigma w) (Python
    `random.Random(20261018)`), each compared with mpmath at 50 digits. `cdf`
    fails 10,070 of them and `sf` 9,902 (tolerance 8e-13), worst 1.03e-10;
    failures span w = -37.62 to 2.10 for `cdf` and -2.10 to 37.63 for `sf`,
-   matching the grid. 4,996 random quantiles (p = U^1, U^10 or U^100 with U
-   uniform, same seed, mu in [-5, 5], sigma in [0.1, 4]) all pass, worst
-   2.4e-14.
+   matching the grid. 4,996 random quantiles (5,000 draws of p = U^1,
+   U^10 or U^100 with U uniform, same seed, mu in [-5, 5], sigma in
+   [0.1, 4]; the 4 draws that underflowed to 0 dropped) all pass, worst
+   2.4e-14. The seed is only a number, the next in this project's series of
+   date-shaped seeds.
 5. **Root cause** (confirmed): `LogNormal::cdf` is `0.5 * erfc((location -
    ln x) / (scale * sqrt 2))` and `sf` is `0.5 * erfc((ln x - location) /
    (scale * sqrt 2))` (`src/distribution/log_normal.rs`), so they inherit the

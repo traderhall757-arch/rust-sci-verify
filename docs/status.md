@@ -569,7 +569,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 22: statrs Weibull distribution** (statrs
   `Weibull::cdf`, `sf`, `inverse_cdf`;
-  [PR #36](https://github.com/traderhall757-arch/rust-sci-verify/pull/36), open):
+  [PR #36](https://github.com/traderhall757-arch/rust-sci-verify/pull/36), merged):
   - New datasets `weibull_cdf` and `weibull_sf` (1139 points each: shapes
     0.1 to 100 x scales 2^-500, 2^-10, 1, 2^10, 2^500, x = u * scale with
     u^k from 1e-300 to 1e300, plus x = 0 and -scale) and `weibull_ppf`
@@ -592,13 +592,36 @@ _Updated at the end of every session. Start here._
     quantile by scale last) fixes every grid point.
   - `pdf` and `ln_pdf` use the same stored power; not checked.
 
+- **Milestone 4, part 23: statrs log-normal distribution** (statrs
+  `LogNormal::cdf`, `sf`, `inverse_cdf`; PR open):
+  - New datasets `lognorm_cdf` and `lognorm_sf` (652 points each: (mu,
+    sigma) in {(0, 0.25), (-3, 0.5), (0, 1), (2, 4)} x x = exp(mu + sigma w)
+    for w = -40..40 step 0.5, plus x = 0 and -1; tolerance 8e-13, because
+    rounding ln x and w costs up to 3.4e-13 in the tails) and `lognorm_ppf`
+    (552 points, the norm_ppf probabilities; p = 1 tagged `pole`; tolerance
+    1e-13). Reference Phi((ln x - mu) / sigma) and exp(mu + sigma
+    Phi^-1(p)), tested against direct quadrature of the density in both
+    tails (out to |w| = 37.5, no erfc involved), erfinv and cdf(ppf(p)) = p;
+    a comparison with `mpmath.ncdf` checks only the wiring (it uses the
+    same erfc for w < 0). SciPy passes
+    every point except the subnormal results at w = -38 and 38 (flushed to
+    0, as for the normal).
+  - `cdf` and `sf` fail 308 of 652 each (about 10 digits, up to 8.6e-11,
+    for 1 <= |w| <= 37.5 on the error-carrying side): **finding 039** (low),
+    approved by Claude after the checklist; root cause statrs's `erfc`
+    (finding 004), exactly as for `Normal` (finding 009). A copy with
+    finding 004's fix passes every grid point and 40,000 random points
+    (seed 20261018). `inverse_cdf` passes all points (worst 3.3e-14).
+  - `scripts/tests/test_select_datasets.py`: the datasets that depend on
+    `_mp_erfcx` now include the three log-normal ones (a guardrail test's
+    expected list, listed under "Checks changed").
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 22, statrs
-   `Weibull`, findings 037 and 038).
+1. **Owner: review and merge the open PR** (Milestone 4 part 23, statrs
+   `LogNormal`, finding 039).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Closed-form statrs distributions:** `LogNormal`,
-     `Pareto`, `Gumbel`, `Laplace`, `Cauchy`, `Levy` (look for finding
+   - **Closed-form statrs distributions:** `Pareto`, `Gumbel`, `Laplace`, `Cauchy`, `Levy` (look for finding
      023's `1 - exp(..)`). Each needs small new datasets; suggested next, as
      it needs no exact discrete distributions.
    - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and

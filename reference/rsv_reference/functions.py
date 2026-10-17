@@ -2004,8 +2004,10 @@ LOGNORM_CDF = Spec(
         "condition number in w, phi(w) / Phi(w), is about |w| in the lower tail, so a method "
         "that rounds ln x and w loses (|ln x| / sigma + |w|) phi(w) / Phi(w) 2^-53, at most "
         "3.4e-13 at a normal result on this grid (mu = -3, sigma = 0.5, w = -37.5); 8e-13 "
-        "allows about 2x that, as norm_cdf does. SciPy flushes the subnormal result at "
-        "w = -38 to 0. Results below 2.2e-308 are judged relative to that number (conventions)"
+        "is 2.35x that, the margin norm_cdf keeps (4e-13 over its 1.6e-13: 2.5x) for "
+        "roundings of up to an ulp rather than half an ulp. SciPy flushes the subnormal "
+        "result at w = -38 to 0. Results below 2.2e-308 are judged relative to that number "
+        "(conventions)"
     ),
     grid_description=(
         f"{_LOGNORM_X_DESCRIPTION}; F is 0 for x <= 0, subnormal from about w = -37.52, 0 "
@@ -2029,9 +2031,9 @@ LOGNORM_SF = Spec(
         "The reasoning of lognorm_cdf mirrored: rounding ln x and w = (ln x - mu) / sigma "
         "costs (|ln x| / sigma + |w|) phi(w) / Phi(-w) 2^-53, about |w| (|ln x| / sigma + "
         "|w|) 2^-53 in the upper tail, at most 3.2e-13 at a normal result on this grid "
-        "(mu = 2, sigma = 4, w = 37.5); 8e-13 as for lognorm_cdf. SciPy flushes the subnormal "
-        "result at w = 38 to 0. Results below 2.2e-308 are judged relative to that number "
-        "(conventions)"
+        "(mu = 2, sigma = 4, w = 37.5); 8e-13 as for lognorm_cdf (2.5x). SciPy flushes the "
+        "subnormal result at w = 38 to 0. Results below 2.2e-308 are judged relative to that "
+        "number (conventions)"
     ),
     grid_description=(
         f"the lognorm_cdf grid: {_LOGNORM_X_DESCRIPTION}; 1 - F is 1 for x <= 0, subnormal "

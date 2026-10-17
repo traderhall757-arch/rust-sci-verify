@@ -1224,8 +1224,10 @@ def test_weibull_ppf_rounding_of_one_over_k_matches_the_tolerance_reason():
 
 @pytest.mark.parametrize(("mu", "sigma"), [(0.0, 0.25), (-3.0, 0.5), (0.0, 1.0), (2.0, 4.0)])
 def test_lognorm_cdf_and_sf_match_mpmath_ncdf(mu, sigma):
-    # mpmath.ncdf is an independent route to Phi (it does not go through
-    # _mp_erfc); every grid point of the parameter pair is compared.
+    # Checks the wiring (ln x, mu, sigma, the sign of w) at every grid point.
+    # mpmath.ncdf is erfc(-w / sqrt 2) / 2 for w < 0, the same formula as
+    # _mp_norm_cdf, and (1 + erf(w / sqrt 2)) / 2 for w >= 0; the independent
+    # check of the tails is the quadrature test below.
     with mpmath.workdps(50):
         for m, s, x in functions.LOGNORM_CDF.grid():
             if (m, s) != (mu, sigma) or x <= 0:
@@ -1237,24 +1239,39 @@ def test_lognorm_cdf_and_sf_match_mpmath_ncdf(mu, sigma):
 
 
 @pytest.mark.parametrize(
-    ("mu", "sigma", "x"),
-    [(0.0, 0.25, 0.5), (-3.0, 0.5, 1e-3), (0.0, 1.0, 1.0), (0.0, 1.0, 7.0), (2.0, 4.0, 1e-20)],
-)
-def test_lognorm_cdf_matches_the_integral_of_the_density(mu, sigma, x):
+    ("mu", "sigma", "w"),
+    [(0.0, 0.25, -1.0), (-3.0, 0.5, -37.5), (-3.0, 0.5, -8.0), (0.0, 1.0, 0.0), (0.0, 1.0, 1.5),
+     (0.0, 1.0, -30.0), (2.0, 4.0, -12.0), (2.0, 4.0, 37.5), (0.0, 0.25, 20.0)],
+)  # fmt: skip
+def test_lognorm_cdf_and_sf_match_the_integral_of_the_density(mu, sigma, w):
     # F(x) = integral of f(s) = phi((ln s - mu) / sigma) / (s sigma) from 0 to
     # x; with s = exp(mu + sigma (w - u)), w = (ln x - mu) / sigma, the
-    # integrand is phi(w - u) for u from 0 to infinity. Quadrature gives 35 or
-    # more digits here, so 30 are compared.
+    # integrand is phi(w - u) for u from 0 to infinity, and 1 - F(x) is the
+    # integral of phi(w + u). Both tails are integrated directly, out to the
+    # last normal result (|w| = 37.5), so no erfc is involved. The breakpoints
+    # follow the e^(-|w| u) decay; quadrature gives 47 or more digits here.
     with mpmath.workdps(50):
+        x = float(mpmath.exp(mu + sigma * mpmath.mpf(w)))
         mu, sigma, x = mp(mu, sigma, x)
         w = (mpmath.log(x) - mu) / sigma
-        integral = mpmath.quad(
-            lambda u: mpmath.exp(-((w - u) ** 2) / 2) / mpmath.sqrt(2 * mpmath.pi),
-            [0, 0.5, 2, 8, mpmath.inf],
-        )
+        h = 1 / (1 + abs(w))
+        points = [0, h, 4 * h, 16 * h, 64 * h, mpmath.inf]
+
+        def tail(sign):
+            # phi(w + sign u) = phi(w) exp(-sign w u - u^2 / 2); phi(w) is taken
+            # out so the integrand is at most 1.
+            phi = mpmath.exp(-(w**2) / 2) / mpmath.sqrt(2 * mpmath.pi)
+            return phi * mpmath.quad(lambda u: mpmath.exp(-sign * w * u - u**2 / 2), points)
+
         cdf = functions._mp_lognorm_cdf(mu, sigma, x)
-        assert close(cdf, integral, 30)
-        assert close(cdf + functions._mp_lognorm_sf(mu, sigma, x), 1)
+        sf = functions._mp_lognorm_sf(mu, sigma, x)
+        # The smaller of F and 1 - F is integrated (the larger one's integrand
+        # peaks far from the breakpoints); the other follows from F + (1 - F) = 1.
+        if w <= 0:
+            assert close(cdf, tail(-1))
+        if w >= 0:
+            assert close(sf, tail(1))
+        assert close(cdf + sf, 1)
 
 
 def test_lognorm_cdf_and_sf_below_the_support():
