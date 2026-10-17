@@ -88,13 +88,17 @@ This program was run in release and debug mode with the same output:
 | sf (0, 2^-500, 2^1023) | 0.0 | 4.651557173616831e-230 | 0.0 | 1 |
 
 Second opinion: SciPy (`scipy.stats.levy`) agrees with mpmath within a few
-ulps at every cause-1 and cause-2 row, but is wrong at every cause-3 and
-cause-4 row (it returns 1 and 0 where x - loc overflows, and 0 in the far
-tail). The generator's route (erfc(s) and erf(s) with
+ulps at the cause-1 rows away from the support, but is wrong at every
+cause-3 and cause-4 row (it returns 1 and 0 where x - loc overflows, and 0
+in the far tail) and in the deep lower tail: there it shares cause 2 (erfc
+of a rounded argument) and misses the tolerance at 52 untagged `cdf` grid
+points (t = 6.9e-4 to 9.8e-4), for example 1.46e-13 at
+(100, 8, 100 + 8 56/65536). Those rows rest on the second mpmath route
+below, which covers that point and (-2^1023, 2^1023, t = 64/65536). The generator's route (erfc(s) and erf(s) with
 s = sqrt(c / (2 (x - mu))) at 60 extra bits) is tested in
 `reference/tests/test_functions.py` against quadrature of the density
 (no error function; including t = 2 and 2.75 with location -2^1023, and the
-deep lower tail at t = 46/65536), against the series of erf for the far
+deep lower tail at t = 46/65536, 56/65536 and 64/65536), against the series of erf for the far
 upper tail (t = 3 2^1050, 3 2^1070, 2^1200, 2^1523 with scale 2^-500, and
 F = 1 - Q there), and outside the support.
 

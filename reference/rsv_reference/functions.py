@@ -2941,8 +2941,9 @@ LEVY_SF = Spec(
     tolerance_reason=(
         "t = (x - mu) / c is exact on this grid (see levy_cdf). Q = erf(sqrt u) with "
         "u = c / (2 (x - mu)) has condition number at most 1/2 in u, so rounding u and the erf "
-        "cost a few ulps; where u is below the smallest normal double (scale 2^-500, "
-        "t >= 3 2^1030) a careful method forms sqrt(c / 2) / sqrt(x - mu) instead. 1e-13 as "
+        "cost a few ulps; where u is below the smallest normal double (t = 1e308, and "
+        "t >= 3 2^1030 with scale 2^-500) a careful method forms sqrt(c / 2) / sqrt(x - mu) "
+        "instead. 1e-13 as "
         "for the other functions; results below 2.2e-308 are judged relative to that number "
         "(conventions)"
     ),
