@@ -2441,6 +2441,172 @@ GUMBEL_PPF = Spec(
     input_tags=_gumbel_ppf_tags,
 )
 
+# --- Laplace distribution (location mu, scale b) --------------------------------
+
+# F(x) = e^z / 2 for z < 0 and 1 - e^-z / 2 for z >= 0, with z = (x - mu) / b.
+# The Gumbel pairs, for the same reasons: scales are powers of two and every
+# grid x is mu + b z exactly, so z is exact; the last pair puts x - mu above
+# the largest double although z is moderate.
+_LAPLACE_PARAMETERS = _GUMBEL_PARAMETERS
+# z: the bulk in steps of 1/4 on both sides (F rounds to 1 above about
+# z = 36.7, Q below about z = -36.7); both far tails (the smaller of F and Q is
+# subnormal from about |z| = 707.7 and 0 from about |z| = 744.4); and points
+# next to 0.
+_LAPLACE_Z = tuple(
+    sorted(
+        {i / 4 for i in range(-160, 161)}
+        | {
+            s * t
+            for s in (-1, 1)
+            for t in (50.0, 100.0, 200.0, 500.0, 700.0, 707.0, 708.0, 709.0, 710.0, 720.0, 740.0,
+                      744.0, 745.0, 746.0, 800.0, 1e3, 1e5, 1e10, 1e100, 1e300, 2.0**-30, 2.0**-60)
+        }
+    )
+)  # fmt: skip
+
+
+def _laplace_x_grid() -> list[tuple[float, float, float]]:
+    # x = mu + b z, kept where it is an exact, finite double that is 0 or normal.
+    points = []
+    for mu, b in _LAPLACE_PARAMETERS:
+        for z in _LAPLACE_Z:
+            # 2200 bits hold mu + b z exactly for every double on this grid.
+            with mpmath.workprec(2200):
+                exact = mpmath.mpf(mu) + mpmath.mpf(b) * mpmath.mpf(z)
+                if abs(exact) >= mpmath.mpf(2) ** 1024:
+                    continue
+                x = float(exact)
+                if mpmath.mpf(x) == exact and (x == 0 or abs(x) >= 2.0**-1022):
+                    points.append((mu, b, x))
+    return sorted(points)
+
+
+def _mp_laplace_cdf(mu: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = e^z / 2 for z < 0 and 1 - e^-z / 2 for z >= 0 (at least 1/2, so the
+    subtraction does not cancel)."""
+    with mpmath.extraprec(60):
+        z = (x - mu) / b
+        return mpmath.exp(z) / 2 if z < 0 else 1 - mpmath.exp(-z) / 2
+
+
+def _mp_laplace_sf(mu: mpmath.mpf, b: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """Q(x) = F(mu - (x - mu)): the distribution is symmetric about mu."""
+    with mpmath.extraprec(60):
+        return _mp_laplace_cdf(mu, b, 2 * mu - x)
+
+
+def _laplace_ppf_grid() -> list[tuple[float, float, float]]:
+    # The gamma_ppf probabilities and the doubles next to 1/2, where the
+    # quantile is mu + b log(2p) with 2p next to 1.
+    ps = sorted({p for _, p in _gamma_ppf_grid()} | {0.5 - 2.0**-54, 0.5 + 2.0**-53})
+    return [(mu, b, p) for mu, b in _LAPLACE_PARAMETERS for p in ps]
+
+
+def _laplace_ppf_tags(mu: float, b: float, p: float) -> list[str]:
+    # The quantile is -inf at p = 0 and +inf at p = 1.
+    return [POLE] if p in (0.0, 1.0) else []
+
+
+def _mp_laplace_ppf(mu: mpmath.mpf, b: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """x = mu + b log(2p) for p <= 1/2 and mu - b log(2 - 2p) for p > 1/2."""
+    with mpmath.extraprec(60):
+        return mu + b * mpmath.log(2 * p) if p <= 0.5 else mu - b * mpmath.log(2 - 2 * p)
+
+
+def laplace_ppf_cancellation(mu: float, b: float, p: float) -> mpmath.mpf:
+    """(|mu| + |b L|) / |mu + b L| with b L the quantile's log part: the ulps that
+    adding mu to a rounded b L can cost."""
+    m = mpmath.mpf(mu)
+    x = _mp_laplace_ppf(m, mpmath.mpf(b), mpmath.mpf(p))
+    return (abs(m) + abs(x - m)) / abs(x)
+
+
+_LAPLACE_PARAMETERS_DESCRIPTION = (
+    "(mu, b) in {(0, 1), (0, 2^-500), (0, 2^500), (-10, 1/4), (100, 8), (-2^1023, 2^1023)}"
+)
+_LAPLACE_X_DESCRIPTION = (
+    f"{_LAPLACE_PARAMETERS_DESCRIPTION} x x = mu + b z for z = -40..40 step 1/4, "
+    "z = +-{50, 100, 200, 500, 700, 707, 708, 709, 710, 720, 740, 744, 745, 746, 800, 1000, "
+    "1e5, 1e10, 1e100, 1e300} and z = +-2^-30, +-2^-60, kept where x is an exact, finite double "
+    "that is 0 or normal (so z = (x - mu) / b is exact)"
+)
+
+LAPLACE_CDF = Spec(
+    name="laplace_cdf",
+    description=(
+        "Laplace distribution cumulative distribution function e^z / 2 (z < 0), "
+        "1 - e^-z / 2 (z >= 0), z = (x - mu) / b (location mu, scale b)"
+    ),
+    inputs=("mu", "b", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x, mu and b are exact doubles, b is a power of two and x - mu = b z with z a double, "
+        "so z is exact; exp of an exact argument is within an ulp, and for z >= 0 the result "
+        "is at least 1/2, so 1 - e^-z / 2 adds at most an ulp. 1e-13 as for the other "
+        "functions; results below 2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_LAPLACE_X_DESCRIPTION}; F is subnormal from about z = -707.7, 0 below about "
+        "z = -744.4 and rounds to 1 above about z = 36.7"
+    ),
+    grid=_laplace_x_grid,
+    mpmath_fn=_mp_laplace_cdf,
+    scipy_name="scipy.stats.laplace.cdf",
+    scipy_fn=lambda mu, b, x: st.laplace.cdf(x, loc=mu, scale=b),
+)
+
+LAPLACE_SF = Spec(
+    name="laplace_sf",
+    description=(
+        "Laplace distribution survival function 1 - e^z / 2 (z < 0), e^-z / 2 (z >= 0), "
+        "z = (x - mu) / b (location mu, scale b)"
+    ),
+    inputs=("mu", "b", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "the mirror image of laplace_cdf (Q(x) = F(2 mu - x)), with the same exact z and the "
+        "same rounding. 1e-13 as for the other functions; results below 2.2e-308 are judged "
+        "relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"the laplace_cdf grid: {_LAPLACE_X_DESCRIPTION}; Q rounds to 1 below about "
+        "z = -36.7, is subnormal from about z = 707.7 and 0 above about z = 744.4"
+    ),
+    grid=_laplace_x_grid,
+    mpmath_fn=_mp_laplace_sf,
+    scipy_name="scipy.stats.laplace.sf",
+    scipy_fn=lambda mu, b, x: st.laplace.sf(x, loc=mu, scale=b),
+)
+
+LAPLACE_PPF = Spec(
+    name="laplace_ppf",
+    description=(
+        "Laplace distribution quantile function mu + b log(2p) (p <= 1/2), "
+        "mu - b log(2 - 2p) (p > 1/2)"
+    ),
+    inputs=("mu", "b", "p"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "p is an exact double, and so are 2p and 2 - 2p (Sterbenz), so a careful method forms "
+        "L = log(2p) or log(2 - 2p) within an ulp; then mu + b L costs (|mu| + |b L|) / "
+        "|mu + b L| ulps, at most about 14 on this grid (mu = 100, b = 8, p = 1e-5; tested), "
+        "1.6e-15. 1e-13 as for the other quantiles"
+    ),
+    grid_description=(
+        f"{_LAPLACE_PARAMETERS_DESCRIPTION} x the gamma_ppf probabilities (p = 0, 5e-324, "
+        "1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, "
+        "1/2 - 1e-10, 1/2, 1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, 0.99, 0.999, 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15 and 1) and the doubles next to 1/2 (1/2 - 2^-54, 1/2 + 2^-53); "
+        "p = 0 and 1 are tagged pole (-inf and +inf), quantiles beyond the largest double are "
+        "tagged overflow"
+    ),
+    grid=_laplace_ppf_grid,
+    mpmath_fn=_mp_laplace_ppf,
+    scipy_name="scipy.stats.laplace.ppf",
+    scipy_fn=lambda mu, b, p: st.laplace.ppf(p, loc=mu, scale=b),
+    input_tags=_laplace_ppf_tags,
+)
+
 # --- hypothesis tests: one-sample t-test --------------------------------------
 
 # Deterministic samples x_i = loc + z_i with z_i = ((7919 i) mod 1000 - 500) / 1000
@@ -3580,7 +3746,7 @@ ALL: tuple[Spec, ...] = (
     INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, CHI_CDF, CHI_SF, CHI_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
     WEIBULL_CDF, WEIBULL_SF, WEIBULL_PPF, LOGNORM_CDF, LOGNORM_SF, LOGNORM_PPF,
     PARETO_CDF, PARETO_SF, PARETO_PPF,
-    GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF,
+    GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF, LAPLACE_CDF, LAPLACE_SF, LAPLACE_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     SKEWTEST,
     F_CDF, F_SF, F_PPF,

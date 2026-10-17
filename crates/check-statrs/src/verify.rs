@@ -5,7 +5,7 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 use crate::expected;
 use statrs::distribution::{
     Beta, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, Gumbel, InverseGamma,
-    LogNormal, Normal, Pareto, StudentsT, Weibull,
+    Laplace, LogNormal, Normal, Pareto, StudentsT, Weibull,
 };
 use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
@@ -103,6 +103,12 @@ fn pareto(alpha: f64, xm: f64) -> Pareto {
 /// in the data).
 fn gumbel(mu: f64, beta: f64) -> Gumbel {
     Gumbel::new(mu, beta).expect("valid parameters")
+}
+
+/// The Laplace distribution with location `mu` and scale `b` (a power of two in
+/// the data).
+fn laplace(mu: f64, b: f64) -> Laplace {
+    Laplace::new(mu, b).expect("valid parameters")
 }
 
 /// The exponential distribution with rate 1 (the reference data's).
@@ -612,6 +618,35 @@ fn statrs_matches_reference() {
         }
         .run(|p| {
             Outcome::scalar(gumbel(p.scalar("mu"), p.scalar("beta")).inverse_cdf(p.scalar("p")))
+        }),
+        Check {
+            function: "statrs::distribution::Laplace::cdf",
+            dataset: "laplace_cdf",
+            expected: &[Expected {
+                finding: "044-statrs-laplace-cdf",
+                points: expected::LAPLACE_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(laplace(p.scalar("mu"), p.scalar("b")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Laplace::sf",
+            dataset: "laplace_sf",
+            expected: &[Expected {
+                finding: "044-statrs-laplace-cdf",
+                points: expected::LAPLACE_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(laplace(p.scalar("mu"), p.scalar("b")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Laplace::inverse_cdf",
+            dataset: "laplace_ppf",
+            expected: &[Expected {
+                finding: "045-statrs-laplace-inverse-cdf",
+                points: expected::LAPLACE_PPF,
+            }],
+        }
+        .run(|p| {
+            Outcome::scalar(laplace(p.scalar("mu"), p.scalar("b")).inverse_cdf(p.scalar("p")))
         }),
         Check {
             function: "statrs::distribution::LogNormal::cdf",

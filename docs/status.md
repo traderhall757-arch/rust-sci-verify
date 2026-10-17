@@ -649,7 +649,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 25: statrs Gumbel distribution** (statrs
   `Gumbel::cdf`, `sf`, `inverse_cdf`;
-  [PR #39](https://github.com/traderhall757-arch/rust-sci-verify/pull/39), open):
+  [PR #39](https://github.com/traderhall757-arch/rust-sci-verify/pull/39), merged):
   - New datasets `gumbel_cdf` and `gumbel_sf` (1092 points each: (mu,
     beta) in (0, 1), (0, 2^-500), (0, 2^500), (-10, 1/4), (100, 8),
     (-2^1023, 2^1023); x = mu + beta z for z = -7..40 step 1/4 plus far
@@ -676,12 +676,35 @@ _Updated at the end of every session. Start here._
     every grid and random point otherwise.
   - `pdf` and `ln_pdf` not checked.
 
+- **Milestone 4, part 26: statrs Laplace distribution** (statrs
+  `Laplace::cdf`, `sf`, `inverse_cdf`;
+  [PR #40](https://github.com/traderhall757-arch/rust-sci-verify/pull/40), open):
+  - New datasets `laplace_cdf` and `laplace_sf` (1828 points each: the
+    Gumbel (mu, b) pairs x x = mu + b z for z = -40..40 step 1/4, both far
+    tails to +-1e300 and +-2^-30, +-2^-60, kept where x is exact) and
+    `laplace_ppf` (174 points, the gamma_ppf probabilities plus the doubles
+    next to 1/2; p = 0 and 1 tagged `pole`, 16 `overflow`). Tolerance
+    1e-13. Reference e^z / 2 and 1 - e^-z / 2, and mu + b log(2p) /
+    mu - b log(2 - 2p), tested against quadrature of the density, half the
+    exponential tail and the root of cdf(x) = p at 1200 bits. SciPy is
+    wrong at the same overflow points as statrs.
+  - `cdf` and `sf` fail 4 of 1828 each: **finding 044** (high, narrow
+    range), approved by Claude after the checklist: x - mu overflows
+    (finding 042's cause), giving exactly 1 and 0 (or 0 and 1).
+  - `inverse_cdf` fails 13 of 174: **finding 045** (high), approved by
+    Claude after the checklist: it **panics** at p = 0 and p = 1 for every
+    parameter (12 points), and b log(2 - 2p) overflows although the
+    quantile is finite (1 point).
+  - Random scans (seeds 20261022 to 20261024): all failures from these
+    causes; a copy with remedies passes every grid and random point.
+  - `pdf` and `ln_pdf` not checked.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 25, statrs
-   `Gumbel`, findings 042 and 043).
+1. **Owner: review and merge the open PR** (Milestone 4 part 26, statrs
+   `Laplace`, findings 044 and 045).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Closed-form statrs distributions:** `Laplace`, `Cauchy`, `Levy` (look for finding
+   - **Closed-form statrs distributions:** `Cauchy`, then `Levy` (look for finding
      023's `1 - exp(..)`, finding 040's `1 - pow(..)` and finding 043's cancellation next to a
      quantile's zero). Each needs small new datasets; suggested next, as it needs no exact
      discrete distributions.
@@ -708,7 +731,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 038 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 045 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -753,7 +776,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
