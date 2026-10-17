@@ -1861,6 +1861,168 @@ def test_cauchy_ppf_cancellation_matches_the_tolerance_reason():
         assert 8.8 * 2.0**-53 < 1e-15 < functions.CAUCHY_PPF.tolerance
 
 
+_LEVY_GRID = set(functions.LEVY_CDF.grid())
+
+
+@pytest.mark.parametrize(
+    ("mu", "c", "x"),
+    [(0.0, 1.0, 46 / 65536), (0.0, 1.0, 5 / 4096), (0.0, 1.0, 0.25), (0.0, 1.0, 1.0),
+     (0.0, 1.0, 40.0), (0.0, 1.0, 1e10), (0.0, 1.0, 1e308), (0.0, 2.0**-500, 2.0**1023),
+     (0.0, 2.0**500, 2.0**500 / 64), (-10.0, 0.25, -9.5), (100.0, 8.0, 140.0),
+     (-_BIG, _BIG, _BIG / 4), (-_BIG, _BIG, _BIG), (-_BIG, _BIG, 1.75 * _BIG)],
+)  # fmt: skip
+def test_levy_cdf_and_sf_match_the_integral_of_the_density(mu, c, x):
+    # The density in t = (x - mu) / c is (2 pi)^-1/2 t^-3/2 e^(-1 / (2 tau)) at tau.
+    # Substituting tau = t / r^2 turns Q = integral from t to inf into
+    # 2 (2 pi t)^-1/2 times the integral of e^(-r^2 / (2 t)) over r in [0, 1], and F =
+    # integral from 0 to t into the same over r in [1, inf); with r = 1 + v the latter
+    # is e^(-1 / (2 t)) times the integral of e^(-(2 v + v^2) / (2 t)) over v >= 0, so
+    # the tiny lower tail keeps its relative precision. No error function involved.
+    with mpmath.workdps(50):
+        mu, c, x = mp(mu, c, x)
+        assert (float(mu), float(c), float(x)) in _LEVY_GRID
+        t = (x - mu) / c
+        k = 2 / mpmath.sqrt(2 * mpmath.pi * t)
+        w = min(t, 1)  # the width of the peaks of both integrands
+        upper = k * mpmath.quad(lambda r: mpmath.exp(-(r**2) / (2 * t)), [0, w / 2, 1])
+        if t >= 1:
+            # F >= erfc(1 / sqrt 2) = 0.317, so 1 - Q does not cancel (and the v
+            # integrand would spread out to v of about sqrt(t)).
+            lower = 1 - upper
+        else:
+            v_integral = mpmath.quad(
+                lambda v: mpmath.exp(-(2 * v + v**2) / (2 * t)), [0, w, 1, mpmath.inf]
+            )
+            lower = k * mpmath.exp(-1 / (2 * t)) * v_integral
+        assert close(functions._mp_levy_cdf(mu, c, x), lower, digits=30)
+        assert close(functions._mp_levy_sf(mu, c, x), upper, digits=30)
+
+
+def test_levy_cdf_and_sf_outside_the_support():
+    # F = 0 and Q = 1 for x <= mu: grid points with t = -1, -2^-30 and 0.
+    for mu, c, x in [
+        (0.0, 1.0, -1.0),
+        (0.0, 1.0, -(2.0**-30)),
+        (0.0, 1.0, 0.0),
+        (100.0, 8.0, 100.0),
+    ]:
+        assert (mu, c, x) in _LEVY_GRID
+        assert functions._mp_levy_cdf(*mp(mu, c, x)) == 0
+        assert functions._mp_levy_sf(*mp(mu, c, x)) == 1
+
+
+def test_levy_sf_upper_tail_matches_its_series():
+    # For large t, Q = erf(s) with s = (2 t)^-1/2 small: Q = (2 / sqrt(pi)) sum
+    # (-1)^k s^(2k+1) / (k! (2k+1)); checks the far tail where c / (2 (x - mu)) is
+    # subnormal (3 2^550, 3 2^570) or below every double, and F = 1 - Q there.
+    with mpmath.workdps(50):
+        for mu, c, x in [
+            (0.0, 1.0, 1e308),
+            (0.0, 2.0**-500, 3 * 2.0**550),
+            (0.0, 2.0**-500, 3 * 2.0**570),
+            (0.0, 2.0**-500, 2.0**700),
+            (0.0, 2.0**-500, 2.0**1023),
+        ]:
+            assert (mu, c, x) in _LEVY_GRID
+            s = 1 / mpmath.sqrt(2 * (mpmath.mpf(x) - mu) / c)
+            q = sum(
+                (-1) ** k * s ** (2 * k + 1) / (mpmath.factorial(k) * (2 * k + 1))
+                for k in range(30)
+            )
+            q *= 2 / mpmath.sqrt(mpmath.pi)
+            assert close(functions._mp_levy_sf(*mp(mu, c, x)), q)
+            assert close(functions._mp_levy_cdf(*mp(mu, c, x)), 1 - q)
+
+
+def test_levy_grid_has_exact_standardised_x():
+    # Every x is mu + c t with c a power of two and t from _LEVY_T, so
+    # t = (x - mu) / c is exact (the tolerance reasons rely on it).
+    grid = functions.LEVY_CDF.grid()
+    assert len(grid) == 1776
+    ts = set(functions._LEVY_T)
+    with mpmath.workprec(2200):
+        for mu, c, x in grid:
+            assert math.frexp(c)[0] == 0.5
+            assert x == 0 or 2.0**-1022 <= abs(x) < math.inf
+            assert (mpmath.mpf(x) - mu) / c in ts
+    # The points where x - mu exceeds the largest double although t is 2 to 2.75.
+    big = [x for mu, _, x in grid if mu == -_BIG and x >= _BIG]
+    assert big == [_BIG, 1.25 * _BIG, 1.5 * _BIG, 1.75 * _BIG]
+    # The scale 2^-500 reaches t = 3 2^1030 to 2^1523, where c / (2 (x - mu)) is below
+    # the smallest normal double (and from 2^1100 below every double).
+    far = [x for mu, c, x in grid if c == 2.0**-500 and x >= 2.0**530]
+    assert far == [3 * 2.0**530, 3 * 2.0**550, 3 * 2.0**570] + [
+        2.0**k for k in (600, 700, 1000, 1023)
+    ]
+
+
+def test_levy_cdf_condition_matches_the_tolerance_reason():
+    # The largest condition number in u at a normal F below 1 is about 698 (as the
+    # tolerance reason says), and Q's is at most 1/2.
+    with mpmath.workdps(30):
+        conds = []
+        for mu, c, x in functions.LEVY_CDF.grid():
+            if x <= mu:
+                continue
+            f = functions._mp_levy_cdf(*mp(mu, c, x))
+            if mpmath.mpf(2) ** -1022 <= f < 1 - mpmath.mpf(2) ** -53:
+                conds.append((functions.levy_cdf_condition_in_u(mu, c, x), mu, c, x))
+            # At most 1/2 (its limit for tiny u), up to the rounding of this sum.
+            assert functions.levy_sf_condition_in_u(mu, c, x) <= 0.5 + mpmath.mpf(10) ** -25
+        worst, mu, c, x = max(conds)
+        assert (mu, c, x) == (100.0, 8.0, 100 + 8 * 47 / 65536)
+        assert 697 < worst < 698
+        assert 698 * 2.0**-53 < 7.8e-14 < functions.LEVY_CDF.tolerance
+
+
+def test_levy_ppf_matches_the_root_of_the_cdf():
+    # The quantile solves F(x) = p: found here by the secant method at 1200 bits
+    # from the cdf (erfc, no inverse), starting next to the route's value.
+    for mu, c in [(0.0, 1.0), (100.0, 8.0), (-_BIG, _BIG)]:
+        for p in (5e-324, 1e-300, 1e-5, 0.25, 0.5 - 2.0**-54, 0.5 + 2.0**-53, 0.9, 1 - 2.0**-53):
+            with mpmath.workdps(50):
+                route = functions._mp_levy_ppf(*mp(mu, c, p))
+            with mpmath.workprec(1200):
+                m, cc, q = mp(mu, c, p)
+                start = route * (1 + mpmath.mpf(10) ** -30) + cc * mpmath.mpf(10) ** -30
+                root = mpmath.findroot(
+                    lambda x, m=m, cc=cc, q=q: functions._mp_levy_cdf(m, cc, x) - q,
+                    (route, start),
+                )
+            with mpmath.workdps(50):
+                assert close(route, root)
+    # Exactly the location at p = 0.
+    assert functions._mp_levy_ppf(*mp(100.0, 8.0, 0.0)) == 100
+
+
+def test_levy_ppf_poles_are_tagged_by_rule():
+    assert functions._levy_ppf_tags(0.0, 1.0, 1.0) == [POLE]
+    assert functions._levy_ppf_tags(0.0, 1.0, 0.0) == []
+    assert functions._levy_ppf_tags(0.0, 1.0, 5e-324) == []
+    assert functions._levy_ppf_tags(0.0, 1.0, 1 - 2.0**-53) == []
+
+
+def test_levy_ppf_cancellation_matches_the_tolerance_reason():
+    # mu + c / z^2 costs (|mu| + |c / z^2|) / |mu + c / z^2| ulps: at most about 7.2 at
+    # a finite, nonzero, untagged quantile on this grid. It is 0 only at p = 0 with
+    # mu = 0.
+    with mpmath.workdps(30):
+        ratios, zeros = [], []
+        for mu, c, p in functions.LEVY_PPF.grid():
+            if functions._levy_ppf_tags(mu, c, p):
+                continue
+            x = functions._mp_levy_ppf(*mp(mu, c, p))
+            if x == 0:
+                zeros.append((mu, c, p))
+            elif abs(x) < mpmath.mpf(2) ** 1024:
+                ratios.append((functions.levy_ppf_cancellation(mu, c, p), mu, c, p))
+        assert sorted(zeros) == [(0.0, 2.0**-500, 0.0), (0.0, 1.0, 0.0), (0.0, 2.0**500, 0.0)]
+        worst, mu, c, p = max(ratios)
+        assert (mu, c, p) == (-_BIG, _BIG, 0.25)
+        assert 7.1 < worst < 7.2
+        assert 7.2 * 2.0**-53 < 8e-16 < functions.LEVY_PPF.tolerance
+
+
 @pytest.mark.parametrize(
     ("a", "b", "p"),
     [
