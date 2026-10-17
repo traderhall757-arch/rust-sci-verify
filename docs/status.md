@@ -618,7 +618,8 @@ _Updated at the end of every session. Start here._
     expected list, listed under "Checks changed").
 
 - **Milestone 4, part 24: statrs Pareto distribution** (statrs
-  `Pareto::cdf`, `sf`, `inverse_cdf`; PR open):
+  `Pareto::cdf`, `sf`, `inverse_cdf`;
+  [PR #38](https://github.com/traderhall757-arch/rust-sci-verify/pull/38), open):
   - New datasets `pareto_cdf` and `pareto_sf` (1062 points each: shapes
     2^-5, 0.1 to 100 x scales 2^-500, 2^-10, 1, 2^10, 2^500, x = u x_m with
     u from 1 + 2^-52 to 1e300 plus 1.1 2^1030, 1.1 2^1060, 2^1100 and
