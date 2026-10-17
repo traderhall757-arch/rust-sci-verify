@@ -701,7 +701,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 27: statrs Cauchy distribution** (statrs
   `Cauchy::cdf`, `sf`, `inverse_cdf`;
-  [PR #41](https://github.com/traderhall757-arch/rust-sci-verify/pull/41), open):
+  [PR #41](https://github.com/traderhall757-arch/rust-sci-verify/pull/41), merged):
   - New datasets `cauchy_cdf` and `cauchy_sf` (1762 points each: the
     Gumbel (mu, b) pairs x x = mu + b z for z = -40..40 step 1/4, both
     heavy tails to +-1e308 (subnormal results) and +-2^-30, +-2^-60, kept
@@ -725,16 +725,39 @@ _Updated at the end of every session. Start here._
     causes; a copy with remedies passes every grid and random point.
   - `pdf` and `ln_pdf` not checked.
 
+- **Milestone 4, part 28: statrs Levy distribution** (statrs
+  `Levy::cdf`, `sf`, `inverse_cdf`;
+  [PR #42](https://github.com/traderhall757-arch/rust-sci-verify/pull/42), open):
+  - New datasets `levy_cdf` and `levy_sf` (1776 points each: the Gumbel
+    (mu, c) pairs x x = mu + c t for t from -1 to 160/4 in steps of 1/65536
+    to 1/4 next to the support, decades to 1e308, and 3 2^1030 to 2^1523,
+    which only scale 2^-500 reaches; kept where x is exact) and `levy_ppf`
+    (180 points, the gamma_ppf probabilities plus the doubles next to 1/2
+    and 1; p = 1 tagged `pole`, 10 `overflow`; p = 0 gives mu). Tolerance
+    1e-13. Reference erfc(s), erf(s) with s = sqrt(c / (2 (x - mu))), and
+    mu + c / Phi^-1(p / 2)^2, tested against quadrature of the density, the
+    erf series in the far tail and the root of cdf(x) = p at 1200 bits.
+  - `cdf` fails 873 and `sf` 381 of 1776: **finding 048** (high), approved
+    by Claude after the checklist: finding 004's erfc constants (erf is
+    1 - erfc inside statrs, so both carry about 1e-10), erfc of a rounded
+    square root next to the support (up to 1.5e-13 even with 004 fixed),
+    x - mu overflow (exactly 1 and 0), and c / (2 (x - mu)) underflowing in
+    the far upper tail (`sf` 0 instead of 4.7e-230).
+  - `inverse_cdf` fails 5 of 180: **finding 049** (high, narrow range),
+    approved by Claude after the checklist: c / (2 y^2) overflows although
+    the quantile is finite (location -2^1023, p near 1/2).
+  - Random scans (seeds 20261028 to 20261032): all failures from these
+    causes, apart from one quantile point where mu and the tail term cancel
+    (1815x, unavoidable); a copy with remedies passes every grid point and
+    every other random point.
+  - `pdf` and `ln_pdf` not checked.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 27, statrs
-   `Cauchy`, findings 046 and 047).
+1. **Owner: review and merge the open PR** (Milestone 4 part 28, statrs
+   `Levy`, findings 048 and 049).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Closed-form statrs distributions:** `Levy` (look for finding 046's `0.5 + atan`
-     cancellation in an erfc form, finding 047's rounded-argument tails and finding 044's
-     x - mu overflow). Needs small new datasets; suggested next, as it needs no exact
-     discrete distributions.
-   - **Remaining statrs hypothesis tests:** `mannwhitneyu` (exact and
+   - **Remaining statrs hypothesis tests** (suggested next): `mannwhitneyu` (exact and
      asymptotic), `ks_onesample` / two-sample (exact distributions),
      `fishers_exact` (hypergeometric sums), `anderson_darling` (its p-value
      is an empirical approximation by design: check the statistic, and the
@@ -744,6 +767,10 @@ _Updated at the end of every session. Start here._
    - puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
      and finding 002's NaN may break it) on `gamma_ppf`; puruspe `invbetai`
      on `betaincinv`; puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
+   - Not yet listed anywhere: statrs `Triangular` and `Uniform` (closed form,
+     continuous) and the discrete distributions (`Poisson`, `Binomial`,
+     `Geometric`, `Hypergeometric`, ...); the owner decides whether they belong
+     in Milestone 4.
    - Optional: the K result of `Inu_Knu` on the `kv` grid (finding 008's
      code path).
    - Keep expected lists small: vector inputs are listed value by value, so
@@ -757,7 +784,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 047 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 049 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -802,7 +829,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).

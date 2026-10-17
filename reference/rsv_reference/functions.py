@@ -2779,6 +2779,212 @@ CAUCHY_PPF = Spec(
     input_tags=_cauchy_ppf_tags,
 )
 
+# --- Levy distribution (location mu, scale c) -----------------------------------
+
+# F(x) = erfc(sqrt(c / (2 (x - mu)))) for x > mu and 0 otherwise. The Gumbel
+# pairs, for the same reasons: scales are powers of two and every grid x is
+# mu + c t exactly, so t = (x - mu) / c is exact; the last pair puts x - mu
+# above the largest double although t is only 2 to 2.75.
+_LEVY_PARAMETERS = _GUMBEL_PARAMETERS
+# t: below and at the start of the support (F = 0, Q = 1); next to it, where F is
+# erfc(s) with s = 1 / sqrt(2 t) large (F is subnormal from about t = 7.1e-4 and 0
+# below about t = 6.7e-4); the bulk in steps of 1/4096, 1/64 and 1/4; the heavy
+# upper tail, where Q is about sqrt(2 / (pi t)), out to t = 2^1523, which only the
+# scale 2^-500 reaches with a finite x (from t = 2^1022, 1 / (2 t) is below the
+# smallest normal double and, unless t is a power of two, loses bits; from
+# t = 2^1075 it is below every double).
+_LEVY_T = tuple(
+    sorted(
+        {mpmath.mpf(t) for t in (-1.0, -(2.0**-30), 0.0, 2.0**-60, 2.0**-30, 1e-10, 1e-5)}
+        | {mpmath.mpf(j) / 65536 for j in range(40, 64)}
+        | {mpmath.mpf(j) / 4096 for j in range(4, 64)}
+        | {mpmath.mpf(j) / 64 for j in range(1, 64)}
+        | {mpmath.mpf(j) / 4 for j in range(4, 161)}
+        | {mpmath.mpf(t) for t in (50.0, 100.0, 1e3, 1e4, 1e5, 1e8, 1e10, 1e15, 1e16, 1e17,
+                                   1e20, 1e50, 1e100, 1e300, 1e305, 1e308)}
+        | {3 * mpmath.mpf(2) ** k for k in (1030, 1050, 1070)}
+        | {mpmath.mpf(2) ** k for k in (1100, 1200, 1500, 1523)}
+    )
+)  # fmt: skip
+
+
+def _levy_x_grid() -> list[tuple[float, float, float]]:
+    # x = mu + c t, kept where it is an exact, finite double that is 0 or normal.
+    points = []
+    for mu, c in _LEVY_PARAMETERS:
+        for t in _LEVY_T:
+            # 2200 bits hold mu + c t exactly for every value on this grid.
+            with mpmath.workprec(2200):
+                exact = mpmath.mpf(mu) + mpmath.mpf(c) * t
+                if abs(exact) >= mpmath.mpf(2) ** 1024:
+                    continue
+                x = float(exact)
+                if mpmath.mpf(x) == exact and (x == 0 or abs(x) >= 2.0**-1022):
+                    points.append((mu, c, x))
+    return sorted(points)
+
+
+def _levy_s(mu: mpmath.mpf, c: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    # s = sqrt(c / (2 (x - mu))) for x > mu, with 60 extra bits.
+    with mpmath.extraprec(60):
+        return mpmath.sqrt(c / (2 * (x - mu)))
+
+
+def _mp_levy_cdf(mu: mpmath.mpf, c: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = erfc(s) with s = sqrt(c / (2 (x - mu))) for x > mu, and 0 for x <= mu
+    (_mp_erfc: mpmath's erfc beyond s = 1e6 overflows internally)."""
+    if x <= mu:
+        return mpmath.mpf(0)
+    with mpmath.extraprec(60):
+        return _mp_erfc(_levy_s(mu, c, x))
+
+
+def _mp_levy_sf(mu: mpmath.mpf, c: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """Q(x) = erf(s) for x > mu (mpmath's erf keeps full relative precision for tiny
+    s), and 1 for x <= mu."""
+    if x <= mu:
+        return mpmath.mpf(1)
+    with mpmath.extraprec(60):
+        return mpmath.erf(_levy_s(mu, c, x))
+
+
+def levy_cdf_condition_in_u(mu: float, c: float, x: float) -> mpmath.mpf:
+    """|u dF/du / F| at u = c / (2 (x - mu)): F = erfc(sqrt u), so this is
+    sqrt(u) e^-u / (sqrt(pi) erfc(sqrt u)), about u + 1/2 for large u."""
+    s = _levy_s(*(mpmath.mpf(v) for v in (mu, c, x)))
+    return s * mpmath.exp(-(s**2)) / (mpmath.sqrt(mpmath.pi) * _mp_erfc(s))
+
+
+def levy_sf_condition_in_u(mu: float, c: float, x: float) -> mpmath.mpf:
+    """|u dQ/du / Q| at u = c / (2 (x - mu)): Q = erf(sqrt u), so this is
+    sqrt(u) e^-u / (sqrt(pi) erf(sqrt u)), at most 1/2 (its limit as u -> 0)."""
+    s = _levy_s(*(mpmath.mpf(v) for v in (mu, c, x)))
+    return s * mpmath.exp(-(s**2)) / (mpmath.sqrt(mpmath.pi) * mpmath.erf(s))
+
+
+def _levy_ppf_grid() -> list[tuple[float, float, float]]:
+    # The gamma_ppf probabilities and the doubles next to 1/2 and 1.
+    ps = sorted({p for _, p in _gamma_ppf_grid()} | {0.5 - 2.0**-54, 0.5 + 2.0**-53, 1 - 2.0**-53})
+    return [(mu, c, p) for mu, c in _LEVY_PARAMETERS for p in ps]
+
+
+def _levy_ppf_tags(mu: float, c: float, p: float) -> list[str]:
+    # The quantile is +inf at p = 1. At p = 0 it is mu, the start of the support:
+    # a finite value, so not a pole.
+    return [POLE] if p == 1.0 else []
+
+
+def _mp_levy_ppf(mu: mpmath.mpf, c: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """x = mu + c / (2 erfc^-1(p)^2) = mu + c / z^2 with z = Phi^-1(p / 2), as
+    erfc^-1(p) = -z / sqrt(2) (p / 2 is exact in mpmath); x = mu at p = 0."""
+    if p == 0:
+        return mpmath.mpf(mu)
+    with mpmath.extraprec(60):
+        return mu + c / _mp_norm_ppf(p / 2) ** 2
+
+
+def levy_ppf_cancellation(mu: float, c: float, p: float) -> mpmath.mpf:
+    """(|mu| + |c / z^2|) / |mu + c / z^2|: the ulps that adding mu to a rounded
+    c / z^2 can cost."""
+    m = mpmath.mpf(mu)
+    x = _mp_levy_ppf(m, mpmath.mpf(c), mpmath.mpf(p))
+    return (abs(m) + abs(x - m)) / abs(x)
+
+
+_LEVY_PARAMETERS_DESCRIPTION = (
+    "(mu, c) in {(0, 1), (0, 2^-500), (0, 2^500), (-10, 1/4), (100, 8), (-2^1023, 2^1023)}"
+)
+_LEVY_X_DESCRIPTION = (
+    f"{_LEVY_PARAMETERS_DESCRIPTION} x x = mu + c t for t in {{-1, -2^-30, 0, 2^-60, 2^-30, "
+    "1e-10, 1e-5}, t = j / 65536 for j = 40..63, j / 4096 for j = 4..63, j / 64 for "
+    "j = 1..63, j / 4 for j = 4..160, t in {50, 100, 1e3, 1e4, 1e5, 1e8, 1e10, 1e15, 1e16, "
+    "1e17, 1e20, 1e50, 1e100, 1e300, 1e305, 1e308}, t = 3 2^1030, 3 2^1050, 3 2^1070 and "
+    "t = 2^1100, 2^1200, 2^1500, 2^1523, "
+    "kept where x is an exact, finite double that is 0 or normal (so t = (x - mu) / c is "
+    "exact)"
+)
+
+LEVY_CDF = Spec(
+    name="levy_cdf",
+    description=(
+        "Levy distribution cumulative distribution function erfc(sqrt(c / (2 (x - mu)))) "
+        "(location mu, scale c)"
+    ),
+    inputs=("mu", "c", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x, mu and c are exact doubles, c is a power of two and x - mu = c t with t exact on "
+        "this grid. F = erfc(sqrt u) with u = c / (2 (x - mu)) has condition number about "
+        "u + 1/2 in u, at most 698 at a normal result on this grid (tested), so rounding u "
+        "once costs up to 7.8e-14 there (as for gumbel_cdf); a careful method then forms "
+        "exp(-u) erfcx(sqrt u), which costs a few ulps more (the square root inside erfc "
+        "would double the loss). 1e-13 as for the other functions; results below 2.2e-308 "
+        "are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_LEVY_X_DESCRIPTION}; F is 0 for t <= 0, subnormal from about t = 7.1e-4, 0 again "
+        "(underflow) below about t = 6.7e-4, and about 1 - sqrt(2 / (pi t)) in the upper tail"
+    ),
+    grid=_levy_x_grid,
+    mpmath_fn=_mp_levy_cdf,
+    scipy_name="scipy.stats.levy.cdf",
+    scipy_fn=lambda mu, c, x: st.levy.cdf(x, loc=mu, scale=c),
+)
+
+LEVY_SF = Spec(
+    name="levy_sf",
+    description=(
+        "Levy distribution survival function erf(sqrt(c / (2 (x - mu)))) (location mu, scale c)"
+    ),
+    inputs=("mu", "c", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "t = (x - mu) / c is exact on this grid (see levy_cdf). Q = erf(sqrt u) with "
+        "u = c / (2 (x - mu)) has condition number at most 1/2 in u, so rounding u and the erf "
+        "cost a few ulps; where u is below the smallest normal double (t = 1e308, and "
+        "t >= 3 2^1030 with scale 2^-500) a careful method forms sqrt(c / 2) / sqrt(x - mu) "
+        "instead. 1e-13 as "
+        "for the other functions; results below 2.2e-308 are judged relative to that number "
+        "(conventions)"
+    ),
+    grid_description=(
+        f"the levy_cdf grid: {_LEVY_X_DESCRIPTION}; Q is 1 for t <= 0, rounds to 1 below about "
+        "t = 0.014 and is about sqrt(2 / (pi t)) in the upper tail (down to 4.7e-230 at "
+        "t = 2^1523)"
+    ),
+    grid=_levy_x_grid,
+    mpmath_fn=_mp_levy_sf,
+    scipy_name="scipy.stats.levy.sf",
+    scipy_fn=lambda mu, c, x: st.levy.sf(x, loc=mu, scale=c),
+)
+
+LEVY_PPF = Spec(
+    name="levy_ppf",
+    description="Levy distribution quantile function mu + c / (2 erfc^-1(p)^2)",
+    inputs=("mu", "c", "p"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "p is an exact double; a careful method forms erfc^-1(p) within a few ulps (Boost's "
+        "erf_inv reaches about 1e-16; 1 - p is exact for p >= 1/2), then c / (2 y^2) costs a "
+        "few ulps more and mu + c / (2 y^2) costs (|mu| + |c / (2 y^2)|) / |x| ulps, at most "
+        "about 7.2 on this grid (tested), 8e-16; it is exactly mu at p = 0. 1e-13 as for the "
+        "other quantiles"
+    ),
+    grid_description=(
+        f"{_LEVY_PARAMETERS_DESCRIPTION} x the gamma_ppf probabilities (p = 0, 5e-324, "
+        "1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, "
+        "1/2 - 1e-10, 1/2, 1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, 0.99, 0.999, 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15 and 1) and the doubles next to 1/2 (1/2 - 2^-54, 1/2 + 2^-53) "
+        "and 1 (1 - 2^-53); the quantile is mu at p = 0, p = 1 is tagged pole (+inf), "
+        "quantiles beyond the largest double are tagged overflow"
+    ),
+    grid=_levy_ppf_grid,
+    mpmath_fn=_mp_levy_ppf,
+    scipy_name="scipy.stats.levy.ppf",
+    scipy_fn=lambda mu, c, p: st.levy.ppf(p, loc=mu, scale=c),
+    input_tags=_levy_ppf_tags,
+)
+
 # --- hypothesis tests: one-sample t-test --------------------------------------
 
 # Deterministic samples x_i = loc + z_i with z_i = ((7919 i) mod 1000 - 500) / 1000
@@ -3919,7 +4125,7 @@ ALL: tuple[Spec, ...] = (
     WEIBULL_CDF, WEIBULL_SF, WEIBULL_PPF, LOGNORM_CDF, LOGNORM_SF, LOGNORM_PPF,
     PARETO_CDF, PARETO_SF, PARETO_PPF,
     GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF, LAPLACE_CDF, LAPLACE_SF, LAPLACE_PPF,
-    CAUCHY_CDF, CAUCHY_SF, CAUCHY_PPF,
+    CAUCHY_CDF, CAUCHY_SF, CAUCHY_PPF, LEVY_CDF, LEVY_SF, LEVY_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     SKEWTEST,
     F_CDF, F_SF, F_PPF,

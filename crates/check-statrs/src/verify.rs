@@ -5,7 +5,7 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 use crate::expected;
 use statrs::distribution::{
     Beta, Cauchy, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, Gumbel,
-    InverseGamma, Laplace, LogNormal, Normal, Pareto, StudentsT, Weibull,
+    InverseGamma, Laplace, Levy, LogNormal, Normal, Pareto, StudentsT, Weibull,
 };
 use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
@@ -115,6 +115,12 @@ fn laplace(mu: f64, b: f64) -> Laplace {
 /// the data).
 fn cauchy(mu: f64, b: f64) -> Cauchy {
     Cauchy::new(mu, b).expect("valid parameters")
+}
+
+/// The Levy distribution with location `mu` and scale `c` (a power of two in the
+/// data).
+fn levy(mu: f64, c: f64) -> Levy {
+    Levy::new(mu, c).expect("valid parameters")
 }
 
 /// The exponential distribution with rate 1 (the reference data's).
@@ -681,6 +687,33 @@ fn statrs_matches_reference() {
             }],
         }
         .run(|p| Outcome::scalar(cauchy(p.scalar("mu"), p.scalar("b")).inverse_cdf(p.scalar("p")))),
+        Check {
+            function: "statrs::distribution::Levy::cdf",
+            dataset: "levy_cdf",
+            expected: &[Expected {
+                finding: "048-statrs-levy-cdf",
+                points: expected::LEVY_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(levy(p.scalar("mu"), p.scalar("c")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Levy::sf",
+            dataset: "levy_sf",
+            expected: &[Expected {
+                finding: "048-statrs-levy-cdf",
+                points: expected::LEVY_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(levy(p.scalar("mu"), p.scalar("c")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::Levy::inverse_cdf",
+            dataset: "levy_ppf",
+            expected: &[Expected {
+                finding: "049-statrs-levy-inverse-cdf",
+                points: expected::LEVY_PPF,
+            }],
+        }
+        .run(|p| Outcome::scalar(levy(p.scalar("mu"), p.scalar("c")).inverse_cdf(p.scalar("p")))),
         Check {
             function: "statrs::distribution::LogNormal::cdf",
             dataset: "lognorm_cdf",
