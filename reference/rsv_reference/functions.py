@@ -2718,7 +2718,7 @@ CAUCHY_CDF = Spec(
     ),
     grid_description=(
         f"{_CAUCHY_X_DESCRIPTION}; F is about 1 / (pi |z|) in the lower tail (subnormal from "
-        "about z = -1.4e307) and rounds to 1 above about z = 2.9e15"
+        "about z = -1.4e307) and rounds to 1 above about z = 5.7e15"
     ),
     grid=_cauchy_x_grid,
     mpmath_fn=_mp_cauchy_cdf,
@@ -2741,7 +2741,7 @@ CAUCHY_SF = Spec(
     ),
     grid_description=(
         f"the cauchy_cdf grid: {_CAUCHY_X_DESCRIPTION}; Q rounds to 1 below about "
-        "z = -2.9e15 and is about 1 / (pi z) in the upper tail (subnormal from about "
+        "z = -5.7e15 and is about 1 / (pi z) in the upper tail (subnormal from about "
         "z = 1.4e307)"
     ),
     grid=_cauchy_x_grid,

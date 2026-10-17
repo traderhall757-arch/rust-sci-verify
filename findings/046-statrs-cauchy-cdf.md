@@ -19,7 +19,8 @@
      about log10 |z| digits are lost. The grid fails from |z| = 1000
      (relative error 1.3e-13) and every point from |z| = 1e16 on is
      exactly 0 (true values down to 3.2e-309). `sf` is the mirror image
-     in the upper tail. Every location and scale on the grid is affected.
+     in the upper tail. Five of the six (location, scale) pairs are affected;
+     the sixth (-2^1023, 2^1023) has no tail points on the grid (|z| <= 2.75).
   2. **x - location above the largest double** (4 points each: location
      -2^1023, scale 2^1023, x = 2^1023 to 1.75 2^1023, so z = 2 to 2.75):
      `x - self.location` overflows to inf although z is moderate, so `cdf`

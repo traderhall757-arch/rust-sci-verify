@@ -36,9 +36,9 @@
      although mu + b T = 1.27e308 is finite (cause 2 of finding 045 in
      `Laplace`).
   Every other point passes (worst 3.1e-14, at location -10, scale 1/4,
-  p = 0.999, where cause 2 has begun); the 22 points where the true
-  quantile is beyond the largest double and statrs returns the right
-  infinity also pass.
+  p = 0.999, where cause 2 has begun); the other 20 points tagged
+  overflow and the 2 pole points with scale 2^1023 (p = 0 and 1), where
+  statrs returns the right infinity, also pass.
 
 `Cauchy::cdf` and `sf` fail for other reasons: [finding 046](046-statrs-cauchy-cdf.md).
 Cause 4 is the same as cause 2 of [finding 045](045-statrs-laplace-inverse-cdf.md)
