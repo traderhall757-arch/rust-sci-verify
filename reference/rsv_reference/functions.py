@@ -2252,6 +2252,195 @@ PARETO_PPF = Spec(
     input_tags=_pareto_ppf_tags,
 )
 
+# --- Gumbel distribution (location mu, scale beta) ------------------------------
+
+# F(x) = exp(-exp(-z)) with z = (x - mu) / beta. Scales are powers of two and
+# every grid x is mu + beta z exactly with z a double, so x - mu = beta z is an
+# exact double and z carries no rounding. The pairs cover the standard
+# distribution, tiny and huge scales, two shifted ones and a location and scale
+# near the largest double, where x - mu overflows although z is moderate.
+_GUMBEL_PARAMETERS = (
+    (0.0, 1.0), (0.0, 2.0**-500), (0.0, 2.0**500), (-10.0, 0.25), (100.0, 8.0),
+    (-(2.0**1023), 2.0**1023),
+)  # fmt: skip
+# z: the bulk in steps of 1/4 (the lower tail, where F underflows below about
+# z = -6.6, is steep); far tails (Q is subnormal from about z = 708.4 and 0
+# above about z = 745.1); and points next to 0.
+_GUMBEL_Z = tuple(
+    sorted(
+        {i / 4 for i in range(-28, 161)}
+        | {-1e3, -100.0, -20.0, -10.0, -8.0, -7.5}
+        | {50.0, 100.0, 200.0, 500.0, 700.0, 708.0, 708.5, 709.0, 710.0, 720.0, 740.0}
+        | {745.0, 746.0, 800.0, 1e3, 1e5, 1e10, 1e100, 1e300}
+        | {s * 2.0**-30 for s in (-1, 1)}
+    )
+)
+
+
+def _gumbel_x_grid() -> list[tuple[float, float, float]]:
+    # x = mu + beta z, kept where it is an exact, finite double that is 0 or
+    # normal.
+    points = []
+    for mu, beta in _GUMBEL_PARAMETERS:
+        for z in _GUMBEL_Z:
+            # 2200 bits hold mu + beta z exactly for every double on this grid.
+            with mpmath.workprec(2200):
+                exact = mpmath.mpf(mu) + mpmath.mpf(beta) * mpmath.mpf(z)
+                if abs(exact) >= mpmath.mpf(2) ** 1024:
+                    continue
+                x = float(exact)
+                if mpmath.mpf(x) == exact and (x == 0 or abs(x) >= 2.0**-1022):
+                    points.append((mu, beta, x))
+    return sorted(points)
+
+
+def _gumbel_z(mu: mpmath.mpf, beta: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    # (x - mu) / beta with 60 extra bits (exact on the grid).
+    with mpmath.extraprec(60):
+        return (x - mu) / beta
+
+
+def _mp_gumbel_cdf(mu: mpmath.mpf, beta: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """F(x) = exp(-exp(-z)) with z = (x - mu) / beta."""
+    with mpmath.extraprec(60):
+        return mpmath.exp(-mpmath.exp(-_gumbel_z(mu, beta, x)))
+
+
+def _mp_gumbel_sf(mu: mpmath.mpf, beta: mpmath.mpf, x: mpmath.mpf) -> mpmath.mpf:
+    """1 - F(x) = -expm1(-exp(-z)); mpmath.expm1 keeps full relative precision in
+    the upper tail, where exp(-z) is tiny."""
+    with mpmath.extraprec(60):
+        return -mpmath.expm1(-mpmath.exp(-_gumbel_z(mu, beta, x)))
+
+
+def gumbel_cdf_condition_in_w(mu: float, beta: float, x: float) -> mpmath.mpf:
+    """|w dF/dw / F| = w at w = exp(-z): F = exp(-w)."""
+    return mpmath.exp(-_gumbel_z(mpmath.mpf(mu), mpmath.mpf(beta), mpmath.mpf(x)))
+
+
+def gumbel_sf_condition_in_w(mu: float, beta: float, x: float) -> mpmath.mpf:
+    """|w dQ/dw / Q| = w / (e^w - 1) at w = exp(-z): at most 1."""
+    w = gumbel_cdf_condition_in_w(mu, beta, x)
+    return w / mpmath.expm1(w)
+
+
+# The quantile mu - beta log(-log p) is 0 at p = 1/e for mu = 0, where
+# log(-log p) cancels: the doubles nearest 1/e and 1/e +- 10^-k probe it.
+_GUMBEL_NEAR_INV_E = tuple(
+    sorted(
+        [float(mpmath.exp(-1))]
+        + [float(mpmath.exp(-1) + s * mpmath.mpf(10) ** -k) for k in (5, 10, 15) for s in (-1, 1)]
+    )
+)
+
+
+def _gumbel_ppf_grid() -> list[tuple[float, float, float]]:
+    ps = sorted({p for _, p in _gamma_ppf_grid()} | set(_GUMBEL_NEAR_INV_E))
+    return [(mu, beta, p) for mu, beta in _GUMBEL_PARAMETERS for p in ps]
+
+
+def _gumbel_ppf_tags(mu: float, beta: float, p: float) -> list[str]:
+    # The quantile is -inf at p = 0 and +inf at p = 1.
+    return [POLE] if p in (0.0, 1.0) else []
+
+
+def _mp_gumbel_ppf(mu: mpmath.mpf, beta: mpmath.mpf, p: mpmath.mpf) -> mpmath.mpf:
+    """x = mu - beta log(-log p). Near p = 1/e, -log p is close to 1 and its log
+    cancels: |1 + log p| is at least 1e-17 on this grid, so the cancellation
+    costs about 57 of the 60 extra bits (tested)."""
+    with mpmath.extraprec(60):
+        return mu - beta * mpmath.log(-mpmath.log(p))
+
+
+_GUMBEL_PARAMETERS_DESCRIPTION = (
+    "(mu, beta) in {(0, 1), (0, 2^-500), (0, 2^500), (-10, 1/4), (100, 8), (-2^1023, 2^1023)}"
+)
+_GUMBEL_X_DESCRIPTION = (
+    f"{_GUMBEL_PARAMETERS_DESCRIPTION} x x = mu + beta z for z = -7..40 step 1/4, z in "
+    "{-1000, -100, -20, -10, -8, -7.5, 50, 100, 200, 500, 700, 708, 708.5, 709, 710, 720, "
+    "740, 745, 746, 800, 1000, 1e5, 1e10, 1e100, 1e300} and z = +-2^-30, kept where x is an "
+    "exact, finite double that is 0 or normal (so z = (x - mu) / beta is exact)"
+)
+
+GUMBEL_CDF = Spec(
+    name="gumbel_cdf",
+    description=(
+        "Gumbel distribution cumulative distribution function exp(-exp(-(x - mu) / beta)) "
+        "(location mu, scale beta)"
+    ),
+    inputs=("mu", "beta", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "x, mu and beta are exact doubles, beta is a power of two and x - mu = beta z with z "
+        "a double, so z = (x - mu) / beta is exact. F = exp(-w) with w = exp(-z) has "
+        "condition number w in w, at most 708.4 at a normal result, so rounding w once costs "
+        "up to 7.9e-14 there (as for weibull_sf), and the outer exp adds an ulp. This assumes "
+        "an exp within about half an ulp (as glibc's is); one good only to 1 ulp could lose "
+        "about 1.5e-13 at the grid's worst point (w = 665), which would not by itself be a "
+        "bug. 1e-13 as for the other functions; results below 2.2e-308 are judged relative "
+        "to that number (conventions)"
+    ),
+    grid_description=(
+        f"{_GUMBEL_X_DESCRIPTION}; F is subnormal from about z = -6.56, 0 below about "
+        "z = -6.61 and rounds to 1 above about z = 36.7"
+    ),
+    grid=_gumbel_x_grid,
+    mpmath_fn=_mp_gumbel_cdf,
+    scipy_name="scipy.stats.gumbel_r.cdf",
+    scipy_fn=lambda mu, beta, x: st.gumbel_r.cdf(x, loc=mu, scale=beta),
+)
+
+GUMBEL_SF = Spec(
+    name="gumbel_sf",
+    description=(
+        "Gumbel distribution survival function -expm1(-exp(-(x - mu) / beta)) "
+        "(location mu, scale beta)"
+    ),
+    inputs=("mu", "beta", "x"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "z = (x - mu) / beta is exact on this grid (see gumbel_cdf). Q = -expm1(-w) with "
+        "w = exp(-z) has condition number w / (e^w - 1), at most 1, in w, so rounding w and "
+        "the expm1 cost a few ulps. 1e-13 as for the other functions; results below "
+        "2.2e-308 are judged relative to that number (conventions)"
+    ),
+    grid_description=(
+        f"the gumbel_cdf grid: {_GUMBEL_X_DESCRIPTION}; Q rounds to 1 below about z = -3.6, "
+        "is subnormal from about z = 708.4 and 0 above about z = 745.1"
+    ),
+    grid=_gumbel_x_grid,
+    mpmath_fn=_mp_gumbel_sf,
+    scipy_name="scipy.stats.gumbel_r.sf",
+    scipy_fn=lambda mu, beta, x: st.gumbel_r.sf(x, loc=mu, scale=beta),
+)
+
+GUMBEL_PPF = Spec(
+    name="gumbel_ppf",
+    description="Gumbel distribution quantile function mu - beta log(-log p)",
+    inputs=("mu", "beta", "p"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "p is an exact double. A careful method forms L = log(-log p) to a few ulps "
+        "relative, also near p = 1/e where -log p is close to 1 (for example L = "
+        "log1p(-log1p(d)) with d = e p - 1 formed in double-double); then mu - beta L costs "
+        "(|mu| + |beta L|) / |mu - beta L| ulps, at most about 14 on this grid (mu = -10, "
+        "beta = 1/4, p = 1 - 1e-15), 1.6e-15. 1e-13 as for the other quantiles"
+    ),
+    grid_description=(
+        f"{_GUMBEL_PARAMETERS_DESCRIPTION} x the gamma_ppf probabilities (p = 0, 5e-324, "
+        "1e-300, 1e-100, 1e-50, 1e-20, 1e-10, 1e-5, 1e-3, 0.01, 0.05, 0.1, 0.25, 0.4, "
+        "1/2 - 1e-10, 1/2, 1/2 + 1e-10, 0.6, 0.75, 0.9, 0.95, 0.99, 0.999, 1 - 1e-5, "
+        "1 - 1e-10, 1 - 1e-15 and 1) and the doubles nearest 1/e and 1/e +- 10^-k for "
+        "k = 5, 10, 15, where the quantile is near 0 for mu = 0; p = 0 and 1 are tagged pole "
+        "(-inf and +inf), quantiles beyond the largest double are tagged overflow"
+    ),
+    grid=_gumbel_ppf_grid,
+    mpmath_fn=_mp_gumbel_ppf,
+    scipy_name="scipy.stats.gumbel_r.ppf",
+    scipy_fn=lambda mu, beta, p: st.gumbel_r.ppf(p, loc=mu, scale=beta),
+    input_tags=_gumbel_ppf_tags,
+)
+
 # --- hypothesis tests: one-sample t-test --------------------------------------
 
 # Deterministic samples x_i = loc + z_i with z_i = ((7919 i) mod 1000 - 500) / 1000
@@ -3391,6 +3580,7 @@ ALL: tuple[Spec, ...] = (
     INVGAMMA_CDF, INVGAMMA_SF, INVGAMMA_PPF, CHI_CDF, CHI_SF, CHI_PPF, EXPON_CDF, EXPON_SF, EXPON_PPF,
     WEIBULL_CDF, WEIBULL_SF, WEIBULL_PPF, LOGNORM_CDF, LOGNORM_SF, LOGNORM_PPF,
     PARETO_CDF, PARETO_SF, PARETO_PPF,
+    GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
     SKEWTEST,
     F_CDF, F_SF, F_PPF,
