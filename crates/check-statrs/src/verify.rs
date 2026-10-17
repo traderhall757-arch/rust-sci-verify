@@ -4,8 +4,8 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 
 use crate::expected;
 use statrs::distribution::{
-    Beta, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, InverseGamma, Normal,
-    StudentsT, Weibull,
+    Beta, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, InverseGamma,
+    LogNormal, Normal, StudentsT, Weibull,
 };
 use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
@@ -86,6 +86,11 @@ fn chi(k: f64) -> Chi {
 /// in the data).
 fn weibull(k: f64, lambda: f64) -> Weibull {
     Weibull::new(k, lambda).expect("valid parameters")
+}
+
+/// The log-normal distribution with location `mu` and scale `sigma`.
+fn lognormal(mu: f64, sigma: f64) -> LogNormal {
+    LogNormal::new(mu, sigma).expect("valid parameters")
 }
 
 /// The exponential distribution with rate 1 (the reference data's).
@@ -537,6 +542,32 @@ fn statrs_matches_reference() {
         }
         .run(|p| {
             Outcome::scalar(weibull(p.scalar("k"), p.scalar("lambda")).inverse_cdf(p.scalar("p")))
+        }),
+        Check {
+            function: "statrs::distribution::LogNormal::cdf",
+            dataset: "lognorm_cdf",
+            expected: &[Expected {
+                finding: "039-statrs-log-normal",
+                points: expected::LOGNORMAL_CDF,
+            }],
+        }
+        .run(|p| Outcome::scalar(lognormal(p.scalar("mu"), p.scalar("sigma")).cdf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::LogNormal::sf",
+            dataset: "lognorm_sf",
+            expected: &[Expected {
+                finding: "039-statrs-log-normal",
+                points: expected::LOGNORMAL_SF,
+            }],
+        }
+        .run(|p| Outcome::scalar(lognormal(p.scalar("mu"), p.scalar("sigma")).sf(p.scalar("x")))),
+        Check {
+            function: "statrs::distribution::LogNormal::inverse_cdf",
+            dataset: "lognorm_ppf",
+            expected: &[],
+        }
+        .run(|p| {
+            Outcome::scalar(lognormal(p.scalar("mu"), p.scalar("sigma")).inverse_cdf(p.scalar("p")))
         }),
         Check {
             function: "statrs::distribution::Exp::cdf",
