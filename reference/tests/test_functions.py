@@ -1496,6 +1496,148 @@ def test_pareto_ppf_log_size_matches_the_tolerance_reason():
     }
 
 
+_GUMBEL_GRID = set(functions.GUMBEL_CDF.grid())
+_BIG = 2.0**1023
+
+
+@pytest.mark.parametrize(
+    ("mu", "beta", "x"),
+    [(0.0, 1.0, -6.5), (0.0, 1.0, -3.0), (0.0, 1.0, 0.0), (0.0, 1.0, 2.5), (0.0, 1.0, 36.75),
+     (0.0, 2.0**-500, 2.0**-498), (-10.0, 0.25, -10.5), (100.0, 8.0, 140.0),
+     (-_BIG, _BIG, 0.0), (-_BIG, _BIG, _BIG), (-_BIG, _BIG, 1.5 * _BIG)],
+)  # fmt: skip
+def test_gumbel_cdf_and_sf_match_the_integral_of_the_density(mu, beta, x):
+    # F = integral of exp(-t - exp(-t)) dt from -inf to z = (x - mu) / beta, and
+    # Q the same from z to inf, by quadrature in t (no closed form involved).
+    # The integrand is below exp(-162000) for t < -12 and below exp(-150) times
+    # its value at z beyond z + 150, far below 30 digits of F (at least
+    # exp(-665) here) and Q.
+    with mpmath.workdps(50):
+        mu, beta, x = mp(mu, beta, x)
+        assert (float(mu), float(beta), float(x)) in _GUMBEL_GRID
+        z = (x - mu) / beta
+
+        def density(t):
+            return mpmath.exp(-t - mpmath.exp(-t))
+
+        # The integrand is sharp next to z in the lower tail (it falls like
+        # exp(-w e^v) at t = z - v, w = exp(-z)), so the breakpoints double
+        # away from z on the scale 1 / (1 + w), and away from the peak at 0.
+        scale = 1 / (1 + mpmath.exp(-z))
+        lower = [z] + [z - 2**k * scale for k in range(80) if z - 2**k * scale > -12] + [-12]
+        upper = sorted({z, z + 150} | {t for k in range(-5, 8) for t in (2**k, -(2**k)) if t > z})
+        # mpmath.quad stops at an absolute error of about 10^-50, so the
+        # integrand is scaled by an exact power of two near 1 / density(z).
+        c = mpmath.ldexp(1, -mpmath.mag(density(z)))
+        lower = mpmath.quad(lambda t: c * density(t), sorted(lower)) / c
+        upper = mpmath.quad(lambda t: c * density(t), upper) / c
+        assert close(functions._mp_gumbel_cdf(mu, beta, x), lower, digits=30)
+        assert close(functions._mp_gumbel_sf(mu, beta, x), upper, digits=30)
+
+
+@pytest.mark.parametrize("z", [5.0, 36.75, 700.0, 745.0, 1e5])
+def test_gumbel_sf_upper_tail_matches_the_series(z):
+    # Q = 1 - exp(-w) = sum_{k>=1} (-1)^(k+1) w^k / k! with w = exp(-z) <= 0.0068,
+    # summed term by term (no expm1); 40 terms are far below 1e-40 relative.
+    with mpmath.workdps(60):
+        w = mpmath.exp(-mpmath.mpf(z))
+        series = mpmath.fsum((-1) ** (k + 1) * w**k / mpmath.factorial(k) for k in range(1, 40))
+    with mpmath.workdps(50):
+        assert (0.0, 1.0, z) in _GUMBEL_GRID
+        assert close(functions._mp_gumbel_sf(*mp(0.0, 1.0, z)), series)
+
+
+def test_gumbel_is_the_exponential_of_exp_minus_z():
+    # exp(-Z) is exponential with rate 1, so F(x) = expon_sf(exp(-z)) and
+    # Q(x) = expon_cdf(exp(-z)). The exponential uses the same exp / expm1, so
+    # this checks the standardisation only.
+    with mpmath.workdps(50):
+        for mu, beta, x in [(0.0, 1.0, -2.0), (-10.0, 0.25, -9.0), (-_BIG, _BIG, _BIG)]:
+            mu, beta, x = mp(mu, beta, x)
+            with mpmath.workprec(1200):
+                w = mpmath.exp(-(x - mu) / beta)
+            assert close(functions._mp_gumbel_cdf(mu, beta, x), functions._mp_expon_sf(w))
+            assert close(functions._mp_gumbel_sf(mu, beta, x), functions._mp_expon_cdf(w))
+
+
+def test_gumbel_grid_has_exact_standardised_x():
+    # Every x is mu + beta z with beta a power of two and z from _GUMBEL_Z, so
+    # z = (x - mu) / beta is exact (the tolerance reasons rely on it).
+    grid = functions.GUMBEL_CDF.grid()
+    assert len(grid) == 1092
+    zs = {mpmath.mpf(z) for z in functions._GUMBEL_Z}
+    with mpmath.workprec(2200):
+        for mu, beta, x in grid:
+            assert math.frexp(beta)[0] == 0.5
+            assert x == 0 or 2.0**-1022 <= abs(x) < math.inf
+            assert (mpmath.mpf(x) - mu) / beta in zs
+    # The points where x - mu exceeds the largest double although z is 2 to 2.75.
+    big = [x for mu, _, x in grid if mu == -_BIG and x - _BIG / 2 >= _BIG / 2]
+    assert big == [_BIG, 1.25 * _BIG, 1.5 * _BIG, 1.75 * _BIG]
+
+
+def test_gumbel_ppf_matches_the_root_of_the_cdf():
+    # The quantile solves F(x) = p: found here by the secant method at 1200 bits
+    # from the cdf (exp only, no logarithm), starting next to the route's value.
+    for mu, beta in [(0.0, 1.0), (-10.0, 0.25), (-_BIG, _BIG)]:
+        for p in (5e-324, 1e-300, 0.25, 0.9, 0.95, 1 - 1e-15, *functions._GUMBEL_NEAR_INV_E):
+            with mpmath.workdps(50):
+                route = functions._mp_gumbel_ppf(*mp(mu, beta, p))
+            with mpmath.workprec(1200):
+                m, b, q = mp(mu, beta, p)
+                start = route * (1 + mpmath.mpf(10) ** -30) + b * mpmath.mpf(10) ** -30
+                root = mpmath.findroot(
+                    lambda x, m=m, b=b, q=q: functions._mp_gumbel_cdf(m, b, x) - q, (route, start)
+                )
+            with mpmath.workdps(50):
+                assert close(route, root)
+
+
+def test_gumbel_ppf_poles_are_tagged_by_rule():
+    assert functions._gumbel_ppf_tags(0.0, 1.0, 0.0) == [POLE]
+    assert functions._gumbel_ppf_tags(0.0, 1.0, 1.0) == [POLE]
+    assert functions._gumbel_ppf_tags(0.0, 1.0, 5e-324) == []
+    assert functions._gumbel_ppf_tags(0.0, 1.0, 1 - 2.0**-53) == []
+
+
+def test_gumbel_condition_numbers_match_the_tolerance_reasons():
+    # cdf: w = exp(-z) in w, below 708.4 at any normal result (665.1 at z = -6.5
+    # on this grid); sf: at most 1.
+    with mpmath.workdps(30):
+        grid = functions.GUMBEL_CDF.grid()
+        normal = [p for p in grid if functions._mp_gumbel_cdf(*mp(*p)) >= mpmath.mpf(2) ** -1022]
+        worst = max(functions.gumbel_cdf_condition_in_w(*p) for p in normal)
+        assert 665 < worst < 665.2
+        assert 708.4 * 2.0**-53 < 7.9e-14 < functions.GUMBEL_CDF.tolerance
+        assert max(functions.gumbel_sf_condition_in_w(*p) for p in grid) <= 1
+
+
+def test_gumbel_ppf_cancellation_matches_the_tolerance_reason():
+    # mu - beta L costs (|mu| + |beta L|) / |mu - beta L| ulps: at most about 14
+    # at a finite, untagged quantile on this grid.
+    with mpmath.workdps(30):
+        ratios = []
+        for mu, beta, p in functions.GUMBEL_PPF.grid():
+            if functions._gumbel_ppf_tags(mu, beta, p):
+                continue
+            m, b, q = mp(mu, beta, p)
+            beta_l = b * mpmath.log(-mpmath.log(q))
+            if abs(m - beta_l) < mpmath.mpf(2) ** 1024:
+                ratios.append(((abs(m) + abs(beta_l)) / abs(m - beta_l), mu, beta, p))
+        worst, mu, beta, p = max(ratios)
+        assert (mu, beta, p) == (-10.0, 0.25, 1 - 1e-15)
+        assert 13 < worst < 14
+        assert 14 * 2.0**-53 < 1.6e-15 < functions.GUMBEL_PPF.tolerance
+
+
+def test_gumbel_ppf_near_inverse_e_cancels_within_the_extra_precision():
+    # log(-log p) loses the leading bits of 1 + log p near p = 1/e: |1 + log p|
+    # is at least 1e-17 on this grid, so about 57 of the 60 extra bits.
+    with mpmath.workprec(300):
+        worst = min(abs(1 + mpmath.log(mpmath.mpf(p))) for p in functions._GUMBEL_NEAR_INV_E)
+    assert 2.0**-60 < 1e-17 < worst
+
+
 @pytest.mark.parametrize(
     ("a", "b", "p"),
     [
