@@ -2968,3 +2968,14 @@ def test_mannwhitneyu_rounding_bound_matches_the_tolerance_reason():
         )
     assert 8.5e-14 < worst <= functions.MANNWHITNEYU.tolerance
     assert (len(point[0]), len(point[1]), point[2]) == (10, 25, 3.0)
+
+
+def test_mannwhitneyu_two_sided_pvalue_is_capped_at_one():
+    # U1 at its mean n1 n2 / 2: twice the tail is above 1 for both the exact and the
+    # asymptotic methods (with continuity correction), so the p-value is exactly 1.
+    x, y = (1.0, 4.0, 5.0, 8.0), (2.0, 3.0, 6.0, 7.0)  # U1 = 8 = 4 * 4 / 2
+    with mpmath.workdps(50):
+        for method in (1.0, 2.0):
+            u, p = functions._mp_mannwhitneyu(mp(*x), mp(*y), mpmath.mpf(method), mpmath.mpf(0))
+            assert u == 8
+            assert p == 1

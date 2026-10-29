@@ -3652,7 +3652,7 @@ MANNWHITNEYU = Spec(
         "{-1000.5, -200.5, 0.5, 150.5, 1000.5} (all values distinct); tied samples with "
         "v_i rounded down to a multiple of 200, sizes {(4, 5), (8, 8), (10, 25)}, d in "
         "{-1000, -200, 0, 200, 1000}, methods 0, 2 and 3; each with alternative -1 (less), "
-        "0 (two-sided) and 1 (greater). U1 from 0 to 250 (54 half-integers), p-value from "
+        "0 (two-sided) and 1 (greater). U1 from 0 to 250 (54 points with a half-integer U1), p-value from "
         "3.2e-7 to 1"
     ),
     grid=_mwu_grid,

@@ -71,7 +71,7 @@ output); it gives the "Crate" column below.
 The second row is the same test with the samples swapped, which statrs gets
 right. Second opinion: SciPy (`scipy.stats.mannwhitneyu`, which computes
 the exact distribution by a different recurrence) agrees with mpmath within
-2.1e-15 at every point of the dataset and every row above. The exact rows
+2.1e-15 at every point of the dataset and within 3.5e-15 at every row above. The exact rows
 need no numerics: 0.0556 = 7/126 is SciPy's documented value (7 of the
 C(9, 4) = 126 splits have U2 >= 17), and with every x below every y only
 one split of C(9, 3) = 84 and one of C(30, 8) = 5852925 is as extreme.
