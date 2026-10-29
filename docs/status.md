@@ -753,7 +753,8 @@ _Updated at the end of every session. Start here._
   - `pdf` and `ln_pdf` not checked.
 
 - **Milestone 4, part 29: statrs Mann-Whitney U test** (statrs
-  `stats_tests::mannwhitneyu`; PR link below, open):
+  `stats_tests::mannwhitneyu`;
+  [PR #43](https://github.com/traderhall757-arch/rust-sci-verify/pull/43), open):
   - New dataset `mannwhitneyu` (690 points: two samples from the distinct
     integers (7919 i) mod 1000, x shifted by d; sizes 3 + 6 to 20 + 8 with
     all four methods (automatic, exact, asymptotic with and without
