@@ -5,6 +5,7 @@ dataset's mpmath function is compared here with a different method (an exact
 identity, a finite sum, or a different mpmath function) where both are valid.
 """
 
+import itertools
 import json
 import math
 from fractions import Fraction
@@ -2869,3 +2870,101 @@ def test_skewtest_rounding_bound_matches_the_tolerance_reason():
         )
     assert 1.6e-12 < worst <= functions.SKEWTEST.tolerance
     assert len(point[0]) == 100
+
+
+@pytest.mark.parametrize("n1, n2", [(1, 1), (3, 6), (4, 5), (5, 4), (6, 3), (8, 8), (2, 11)])
+def test_mannwhitneyu_null_counts_match_enumeration(n1, n2):
+    # The recurrence against every split of the ranks 1..n1+n2 (U = R1 - n1 (n1 + 1) / 2).
+    counts = [0] * (n1 * n2 + 1)
+    for split in itertools.combinations(range(1, n1 + n2 + 1), n1):
+        counts[sum(split) - n1 * (n1 + 1) // 2] += 1
+    assert functions._mwu_null_counts(n1, n2) == counts
+    assert counts == counts[::-1]  # symmetric, as the two-sided p-value assumes
+
+
+def test_mannwhitneyu_matches_the_published_example():
+    # SciPy's documented example: females against males, exact, "less": U1 = 3,
+    # p = 0.05555555555555555 (= 7/126, the 7 splits with U2 >= 17 of C(9, 4)).
+    males = [19.0, 22.0, 16.0, 29.0, 24.0]
+    females = [20.0, 11.0, 17.0, 12.0]
+    with mpmath.workdps(50):
+        u, p = functions._mp_mannwhitneyu(mp(*females), mp(*males), mpmath.mpf(1), mpmath.mpf(-1))
+        assert p == mpmath.mpf(7) / 126
+    assert u == 3
+    assert functions._mwu_exact_sf(2 * 17, 5, 4) == (7, 126)
+    assert float(p) == 0.05555555555555555
+
+
+def test_mannwhitneyu_ranks_and_statistic_match_counting():
+    # U1 = #(x > y) + #(x = y) / 2 over all pairs, for every grid sample (ties included).
+    for x, y, method, alt in functions._mwu_grid():
+        if method != 0 or alt != 0:
+            continue
+        twice_pairs = sum(2 if a > b else 1 if a == b else 0 for a in x for b in y)
+        assert functions._mwu_twice_u1(x, y) == twice_pairs
+
+
+@pytest.mark.parametrize(
+    "x, y",
+    [((0, 0, 1, 2), (1, 1, 2, 3, 3)), ((5, 5, 5), (5, 6, 6, 7)), ((1, 2, 2, 2, 3, 4), (2, 4, 4))],
+)
+def test_mannwhitneyu_tie_corrected_variance_matches_enumeration(x, y):
+    # s^2 against the variance of U1 over every split of the pooled values (average
+    # ranks), which is the exact null variance with ties.
+    xy = x + y
+    n1, n = len(x), len(x) + len(y)
+    us = [
+        Fraction(
+            functions._mwu_twice_u1([xy[i] for i in s], [xy[i] for i in range(n) if i not in s]), 2
+        )
+        for s in itertools.combinations(range(n), n1)
+    ]
+    mean = sum(us, Fraction(0)) / len(us)
+    var = sum(((u - mean) ** 2 for u in us), Fraction(0)) / len(us)
+    assert mean == Fraction(n1 * len(y), 2)
+    with mpmath.workdps(50):
+        # z without continuity correction at U = mean + 1 is 1 / s.
+        twice_u = int(2 * (mean + 1))
+        z = functions._mwu_z(twice_u, n1, len(y), functions._mwu_tie_term(x, y), False)
+        assert close(1 / z**2, mpmath.mpf(var.numerator) / var.denominator)
+
+
+@pytest.mark.parametrize("alt", [-1.0, 0.0, 1.0])
+def test_mannwhitneyu_asymptotic_pvalue_matches_the_normal_cdf(alt):
+    # The erfc tail against mpmath.ncdf at the tested U (U1, U2 or the larger), clipped at 1.
+    x, y = functions._mwu_samples(10, 25, 150.5, False)
+    u1 = Fraction(functions._mwu_twice_u1(x, y), 2)
+    with mpmath.workdps(50):
+        for method in (2.0, 3.0):
+            u, p = functions._mp_mannwhitneyu(mp(*x), mp(*y), mpmath.mpf(method), mpmath.mpf(alt))
+            assert u == mpmath.mpf(u1.numerator) / u1.denominator
+            tested = {1.0: u1, -1.0: 250 - u1, 0.0: max(u1, 250 - u1)}[alt]
+            mu, cc = mpmath.mpf(125), mpmath.mpf(0.5) if method == 2 else 0
+            z = (mpmath.mpf(tested.numerator) / tested.denominator - mu - cc) / mpmath.sqrt(
+                mpmath.mpf(10 * 25 * 36) / 12
+            )
+            expected = min((2 if alt == 0 else 1) * mpmath.ncdf(-z), 1)
+            assert close(p, expected, digits=35)
+
+
+def test_mannwhitneyu_automatic_method_follows_the_rule():
+    # Exact when n1 <= 8 or n2 <= 8 and there are no ties; asymptotic with continuity
+    # correction otherwise (SciPy's and statrs's rule).
+    with mpmath.workdps(50):
+        for x, y, method, alt in functions._mwu_grid():
+            if method != 0:
+                continue
+            ties = len(set(x) | set(y)) < len(x) + len(y)
+            rule = 2.0 if (len(x) > 8 and len(y) > 8) or ties else 1.0
+            args = (mp(*x), mp(*y))
+            auto = functions._mp_mannwhitneyu(*args, mpmath.mpf(0), mpmath.mpf(alt))
+            assert auto == functions._mp_mannwhitneyu(*args, mpmath.mpf(rule), mpmath.mpf(alt))
+
+
+def test_mannwhitneyu_rounding_bound_matches_the_tolerance_reason():
+    with mpmath.workdps(30):
+        worst, point = max(
+            (functions.mannwhitneyu_rounding_bound(*p), p) for p in functions._mwu_grid()
+        )
+    assert 8.5e-14 < worst <= functions.MANNWHITNEYU.tolerance
+    assert (len(point[0]), len(point[1]), point[2]) == (10, 25, 3.0)
