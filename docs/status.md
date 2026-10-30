@@ -842,7 +842,8 @@ _Updated at the end of every session. Start here._
     library's `fractions` import in `functions.py` (exact rationals, no state).
 
 - **Milestone 4, part 32: statrs two-sample Kolmogorov-Smirnov test** (statrs
-  `stats_tests::ks_test::ks_twosample`; PR open, see "Next"):
+  `stats_tests::ks_test::ks_twosample`;
+  [PR #46](https://github.com/traderhall757-arch/rust-sci-verify/pull/46), open):
   - New dataset `ks_2samp` (363 points: the Mann-Whitney samples with
     half-integer shifts and an interleaved pair, sizes (1, 1) to (100, 100)
     with all four methods and (101, 100) without the exact one; tied samples
@@ -871,7 +872,7 @@ _Updated at the end of every session. Start here._
 ## Next
 
 1. **Owner: review and merge the open PR** (Milestone 4 part 32, statrs
-   `ks_twosample`, finding 054).
+   `ks_twosample`, finding 054): [PR #46](https://github.com/traderhall757-arch/rust-sci-verify/pull/46).
 2. **Milestone 4, continued** (next session; one family per PR):
    - **Remaining statrs hypothesis test** (suggested next):
      `anderson_darling` (its p-value is an empirical approximation by
