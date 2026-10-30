@@ -957,7 +957,7 @@ fn statrs_matches_reference() {
             ],
         }
         .run(|p| {
-            // The table entries are whole numbers below 2^53 (see the dataset header).
+            // The table entries are whole numbers (see the dataset grid), at most 2000.
             let table = ["a", "b", "c", "d"].map(|k| p.scalar(k) as u64);
             statistic_and_pvalue(fishers_exact_with_odds_ratio(
                 &table,

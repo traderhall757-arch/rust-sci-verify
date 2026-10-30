@@ -7,13 +7,13 @@
   2.2e-14 instead of 2.2e-59; 0.529 instead of 0.368 for the 6 x 9 x 16 x
   41 table)
 - **Status:** approved (Claude, checklist complete, 2026-10-30)
-- **Affected inputs:** 51 of 414 points of `reference/data/fisher_exact.jsonl`
+- **Affected inputs:** 51 of 411 points of `reference/data/fisher_exact.jsonl`
   (tolerance 1e-13, for the odds ratio and the p-value), all two-sided.
   The exact list is `FISHER_EXACT` in `crates/check-statrs/src/expected.rs`,
   the report is [reports/statrs-0.19.1.md](../reports/statrs-0.19.1.md).
   The odds ratio is always right, and so are the one-sided p-values apart
   from finding 052. Two causes (section "Root cause"):
-  1. **Upper tail as 1 - cdf** (42 points, 2.9e-12 to 8.1e273 times off):
+  1. **Upper tail as 1 - cdf** (42 points, relative errors from 2.9e-12 to 8.1e273):
      the two-sided p-value adds an upper tail computed as `1 - cdf`, which
      keeps only an absolute accuracy of about 1e-16 times the number of
      terms. Small p-values lose digits (3e-4 relative error at 1.45e-11), and
@@ -25,9 +25,10 @@
      that are more probable are added to the p-value. SciPy uses a window of
      1e-14, which only absorbs rounding.
 
-  Another 114 points of the dataset fail only through statrs's
-  `Hypergeometric` pmf and cdf (finding 052); they are listed there as
-  `FISHER_EXACT_HYPERGEOMETRIC`.
+  Another 114 points of the dataset pass once statrs's `Hypergeometric` pmf
+  and cdf are accurate (finding 052); they are listed there as
+  `FISHER_EXACT_HYPERGEOMETRIC`. 14 of them (all two-sided) would also pass
+  with this finding's remedies alone: either fix clears them.
 
 ## Reproduction
 
@@ -58,7 +59,7 @@ mode give the same output; the rest of it is in finding 052); it gives the
 | 0, 20, 20, 0 | 1 | 1.4504508705215358e-11 | 1.4508889103849688e-11 | 1.4508889103849688e-11 |
 | 0, 100, 100, 0 | 1 | 2.2315482794965646e-14 | 2.2087606931995028e-59 | 2.208760693199503e-59 |
 | 6, 9, 16, 41 | 2 | 0.5294033745950272 | 0.3676007792428934 | 0.36760077924289336 |
-| 1, 28, 32, 25 | 2 | 9.27084059632044e-7 | 4.858505327102482e-7 | 4.858505327102481e-7 |
+| 1, 28, 32, 25 | 1 and 2 | 9.27084059632044e-7 | 4.858505327102482e-7 | 4.858505327102481e-7 |
 
 The true values are exact fractions: [0, 20, 20, 0] has p = 2 / C(40, 20)
 (only it and [20, 0, 0, 20] are as improbable), [0, 100, 100, 0] has
@@ -90,12 +91,12 @@ below `DEFAULT_EPS` = 1e-9.
    or at the mean + k sd with k uniform in (-10, 10), b c > 0, alternative
    uniform; true p from the exact counts. 370 of the 1,032 two-sided points
    fail through cause 1 (all still fail with finding 052 remedied). No
-   random table had a near tie; a search over all margins (totals 72 to
-   117, the first 40 tables with another table at most 1e-4 more probable)
-   gave 40 failures through cause 2 (38% to 91% off) that remain with
-   every other remedy.
+   two-sided random table had a near tie; a search over all margins (totals
+   72 to 117, the first 40 tables with another table at most 1e-4 more
+   probable) gave 40 failures through cause 2 (31% to 91% off) that remain
+   with every other remedy.
 5. **Root cause** (from the source, `src/stats_tests/fisher.rs`, confirmed
-   with a copy that is bit for bit equal to statrs on all 414 grid points
+   with a copy that is bit for bit equal to statrs on all 411 grid points
    and all 3,000 random ones):
    - **Cause 1:** `1.0 - dist.cdf(table[0] - 1)` (upper tail when a is at
      or above the mode) and `p_lower + 1.0 - dist.cdf(guess - 1)` (the other
@@ -103,8 +104,10 @@ below `DEFAULT_EPS` = 1e-9.
      `Hypergeometric::sf` does, removes this cause.
    - **Cause 2:** `const EPSILON: f64 = 1.0 - 1e-4`, used both for the
      "p = 1 at the mode" test and in `binary_search`, which accepts
-     `pmf(guess) <= p_exact / EPSILON`. With 1 - 1e-14 (SciPy's window) all
-     12 grid points and the 40 searched tables pass.
+     `pmf(guess) <= p_exact / EPSILON`. With 1 - 1e-14 (SciPy's window)
+     and the cause 1 remedy, all 12 grid points and the 40 searched tables
+     pass (the window alone leaves 4 of the 12 and 25 of the 40 failing by
+     up to 6.5e-8, through cause 1).
 
    The copy with both remedies and finding 052's passes every grid and
    random point (worst 3.5e-15).
@@ -118,6 +121,12 @@ smaller the two-sided p-value, the fewer digits are right; below about
 Not on the grid (no listed points): tables with an empty row or column
 return p = 1 and odds ratio NaN by convention, as in SciPy, and
 `fishers_exact_with_odds_ratio` forms a d and b c in `u64`, which overflows
-for products above 1.8e19 (a panic in debug mode; not run). Tables with b c = 0 (odds ratio +inf) are left out
-of the grid because the generator would tag them `overflow`, which leaves
-the p-value unjudged.
+for products above 1.8e19 (a panic in debug mode; not run).
+
+Tables with b c = 0 (odds ratio +inf, a division by zero) are left out of
+the grid: the generator would tag them `overflow`, and at an overflow point
+a finite p-value, even a right one, is judged crate wrong. statrs's
+p-value fails there too (no listed points): (100, 0, 0, 100) two-sided
+gives 2.2315482794965646e-14 instead of 2.2087606931995028e-59, and
+(700, 300, 0, 900) two-sided gives 0.4649603749233522 instead of
+2.5989585364396736e-278 (exact counts).

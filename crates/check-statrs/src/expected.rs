@@ -16146,8 +16146,9 @@ pub(crate) const FISHER_EXACT: &[&[f64]] = &[
     &[699.0, 301.0, 1.0, 899.0, 0.0],
 ];
 
-/// `statrs::stats_tests::fisher::fishers_exact_with_odds_ratio`, wrong only through
-/// statrs's `Hypergeometric` pmf and cdf (finding 052): 114 points, inputs as for
+/// `statrs::stats_tests::fisher::fishers_exact_with_odds_ratio`, right once statrs's
+/// `Hypergeometric` pmf and cdf are accurate (finding 052; 14 of these, two-sided,
+/// would also pass with finding 051's remedies alone): 114 points, inputs as for
 /// `FISHER_EXACT`.
 pub(crate) const FISHER_EXACT_HYPERGEOMETRIC: &[&[f64]] = &[
     &[3.0, 5.0, 4.0, 50.0, 0.0],

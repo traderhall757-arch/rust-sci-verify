@@ -3668,7 +3668,9 @@ MANNWHITNEYU = Spec(
 # mode + k sd for k in _FISHER_SDS (sd of the hypergeometric distribution of a).
 # Every row and column sum is positive (statrs and SciPy return p = 1 and odds
 # ratio NaN otherwise, a convention, not a value), and b c > 0: an odds ratio of
-# +inf would get the generator's overflow tag, which leaves the p-value unjudged.
+# +inf is a division by zero, not a large finite value, yet the generator would tag
+# it overflow, and at an overflow point a finite p-value, even a right one, is
+# judged crate wrong.
 # Above about 1030 values C(n1 + n2, n) exceeds the largest double, so the
 # largest margins test that.
 _FISHER_MARGINS = (
@@ -3686,7 +3688,7 @@ _FISHER_MARGINS = (
 )
 _FISHER_SDS = (-8, -4, -2, -1, -0.5, 0, 0.5, 1, 2, 4, 8)
 # Published tables: SciPy's documentation (8, 2, 1, 5) and (6, 2, 1, 4), Fisher's
-# tea tasting (3, 1, 1, 3), and the tables of statrs's own tests.
+# tea tasting (3, 1, 1, 3), and the 7 tables of statrs's fisher test cases.
 _FISHER_PUBLISHED = (
     (8, 2, 1, 5),
     (6, 2, 1, 4),
@@ -3698,7 +3700,6 @@ _FISHER_PUBLISHED = (
     (186, 177, 111, 154),
     (137, 49, 135, 183),
     (37, 115, 37, 152),
-    (31, 9, 13, 2),
 )
 
 
@@ -3819,8 +3820,8 @@ FISHER_EXACT = Spec(
         "(tested). The odds ratio is two products and a quotient, exact or within 2 ulp"
     ),
     grid_description=(
-        "Published tables (SciPy's documentation, Fisher's tea tasting, statrs's own "
-        "tests: 11 tables), the first 12 tables (by total, then n1 <= n <= n2) whose "
+        "Published tables (SciPy's documentation, Fisher's tea tasting, statrs's "
+        "fisher test cases: 10 tables), the first 12 tables (by total, then n1 <= n <= n2) whose "
         "probability is below another table's by at most 1e-4 relative (the first is "
         "(6, 9, 16, 41)), and tables by their margins (n1 = a + b, n2 = c + d, "
         "n = a + c) in {(3, 5, 4), (5, 5, 5), (10, 10, 8), (8, 30, 12), (20, 20, 20), "
@@ -3828,8 +3829,8 @@ FISHER_EXACT = Spec(
         "(1000, 900, 700)} with a at both ends of its support, next to them, at the mode, "
         "and at the mean + k sd for k in {+-8, +-4, +-2, +-1, +-0.5, 0}; each with "
         "alternative -1 (less), 0 (two-sided) and 1 (greater). No row or column sum is "
-        "zero, and b c > 0 (an infinite odds ratio would be tagged overflow, leaving "
-        "the p-value unjudged), which leaves out a at the top of its support"
+        "zero, and b c > 0 (an infinite odds ratio would be tagged overflow, and a "
+        "finite p-value at an overflow point is judged crate wrong), which leaves out a at the top of its support"
     ),
     grid=_fisher_grid,
     mpmath_fn=_mp_fisher_exact,
