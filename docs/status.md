@@ -899,7 +899,8 @@ _Updated at the end of every session. Start here._
     larger p-value) and exceeds 1 above z = 306.71.
 
 - **Milestone 4, part 34: puruspe invgammp** (follow-up; `puruspe::invgammp`
-  on `gamma_ppf`; PR link below, open):
+  on `gamma_ppf`;
+  [PR #48](https://github.com/traderhall757-arch/rust-sci-verify/pull/48), open):
   - No new data: the existing `gamma_ppf` dataset (432 points, tolerance
     2e-13). `invgammp` takes (p, a).
   - It fails 397 of 432 points: **finding 056** (high), approved by Claude
@@ -924,7 +925,7 @@ _Updated at the end of every session. Start here._
 ## Next
 
 1. **Owner: review and merge the open PR** (Milestone 4 part 34, puruspe
-   `invgammp`, finding 056): PR link below.
+   `invgammp`, finding 056): [PR #48](https://github.com/traderhall757-arch/rust-sci-verify/pull/48).
 2. **Milestone 4, continued** (next session; one family per PR):
    - All statrs hypothesis tests are now checked. **Suggested next:**
      puruspe `invbetai` on `betaincinv` (calls `betai`, finding 001);
