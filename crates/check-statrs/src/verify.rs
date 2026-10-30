@@ -11,7 +11,9 @@ use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
 use statrs::stats_tests::f_oneway::f_oneway;
 use statrs::stats_tests::fisher::fishers_exact_with_odds_ratio;
-use statrs::stats_tests::ks_test::{KSOneSampleAlternativeMethod, ks_onesample};
+use statrs::stats_tests::ks_test::{
+    KSOneSampleAlternativeMethod, KSTwoSampleAlternativeMethod, ks_onesample, ks_twosample,
+};
 use statrs::stats_tests::mannwhitneyu::{MannWhitneyUMethod, mannwhitneyu};
 use statrs::stats_tests::skewtest::skewtest;
 use statrs::stats_tests::ttest_onesample::ttest_onesample;
@@ -205,6 +207,18 @@ fn ks_method(code: f64) -> KSOneSampleAlternativeMethod {
     }
 }
 
+/// The two-sample Kolmogorov-Smirnov method of a point's method code (see the
+/// dataset header).
+fn ks2_method(code: f64) -> KSTwoSampleAlternativeMethod {
+    match code {
+        0.0 => KSTwoSampleAlternativeMethod::LessAsymptotic,
+        1.0 => KSTwoSampleAlternativeMethod::GreaterAsymptotic,
+        2.0 => KSTwoSampleAlternativeMethod::TwoSidedExact,
+        3.0 => KSTwoSampleAlternativeMethod::TwoSidedAsymptotic,
+        _ => panic!("method code {code}"),
+    }
+}
+
 /// Turns a test's `(statistic, p-value)` result into the two outputs.
 fn statistic_and_pvalue<E: std::fmt::Debug>(r: Result<(f64, f64), E>) -> Outcome {
     match r {
@@ -283,6 +297,25 @@ fn f_dist(p: &harness::Point, arg: &str, f: impl Fn(&FisherSnedecor, f64) -> f64
 #[test]
 fn statrs_matches_reference() {
     let results = [
+        // First, and in child processes: the two-sided asymptotic method never
+        // returns where the statistic is 0 or nearly 0 (finding 054), and a
+        // child that loops is killed, unlike an abandoned thread.
+        Check {
+            function: "statrs::stats_tests::ks_test::ks_twosample",
+            dataset: "ks_2samp",
+            expected: &[Expected {
+                finding: "054-statrs-ks-twosample",
+                points: expected::KS_2SAMP,
+            }],
+        }
+        .run_isolated("verify::statrs_matches_reference", TIME_LIMIT, |p| {
+            statistic_and_pvalue(ks_twosample(
+                p.inputs["x"].clone(),
+                p.inputs["y"].clone(),
+                ks2_method(p.scalar("method")),
+                NaNPolicy::Error,
+            ))
+        }),
         Check {
             function: "statrs::function::gamma::gamma",
             dataset: "gamma",

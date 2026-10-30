@@ -4092,6 +4092,203 @@ KS_1SAMP = Spec(
     scipy_fn=_sc_ks_1samp,
 )
 
+# --- hypothesis tests: two-sample Kolmogorov-Smirnov test ----------------------
+
+# Two samples x (size n1) and y (size n2), compared through their empirical cdfs F1
+# and F2: D+ = max(F1 - F2), D- = max(F2 - F1) (both at least 0, as the cdfs agree
+# below every value), D = max(D+, D-). With m >= n the larger and smaller size:
+# method 0 less (D-) and 1 greater (D+), each with Hodges's (1957, eq. 5.3)
+# approximation exp(-2 z^2 - 2 z (m + 2 n) / (3 sqrt(m n (m + n)))), z = d sqrt(m n /
+# (m + n)), as statrs and SciPy write it; 2 two-sided exact P(D >= d) when no value
+# repeats; 3 two-sided asymptotic 1 - K(d sqrt(m n / (m + n))), K Kolmogorov's limit
+# distribution. The untied samples are _mwu_samples with half-integer shifts and an
+# interleaved pair (x_i = 2 n2 i, y_j = 2 n1 j - 1: F1 and F2 alternate, so D is
+# small); statrs refuses the exact method for n1 n2 > 10000, so (101, 100) has
+# methods 0, 1 and 3 only. The tied samples (values repeat within and across the
+# samples) have methods 0, 1 and 3: the exact null distribution with ties is not the
+# one statrs and SciPy compute. Among them y is x repeated k times, so F1 = F2
+# everywhere and D = 0.
+_KS2_SIZES = ((1, 1), (1, 8), (8, 1), (3, 6), (6, 3), (4, 5), (8, 8), (8, 20), (20, 8),
+              (10, 25), (50, 50), (100, 100))  # fmt: skip
+_KS2_LARGE_SIZES = ((101, 100),)
+_KS2_TIED_SIZES = ((4, 5), (8, 8), (10, 25))
+_KS2_REPEATS = ((3, 1), (3, 2), (10, 1), (10, 3))
+_KS2_METHODS = {
+    0.0: ("less", "asymp"),
+    1.0: ("greater", "asymp"),
+    2.0: ("two-sided", "exact"),
+    3.0: ("two-sided", "asymp"),
+}
+
+
+def _ks2_interleaved(n1: int, n2: int) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    return (
+        tuple(float(2 * n2 * i) for i in range(1, n1 + 1)),
+        tuple(float(2 * n1 * j - 1) for j in range(1, n2 + 1)),
+    )
+
+
+def _ks2_grid() -> list[tuple[tuple[float, ...], tuple[float, ...], float]]:
+    grid = []
+    for sizes, methods in ((_KS2_SIZES, (0.0, 1.0, 2.0, 3.0)), (_KS2_LARGE_SIZES, (0.0, 1.0, 3.0))):
+        for n1, n2 in sizes:
+            pairs = [_mwu_samples(n1, n2, d, False) for d in _MWU_SHIFTS]
+            pairs.append(_ks2_interleaved(n1, n2))
+            grid.extend((x, y, m) for x, y in pairs for m in methods)
+    tied = [_mwu_samples(n1, n2, d, True) for n1, n2 in _KS2_TIED_SIZES for d in _MWU_TIED_SHIFTS]
+    for n, k in _KS2_REPEATS:
+        x = _mwu_samples(n, 0, 0.0, True)[0]
+        tied.append((x, x * k))
+    grid.extend((x, y, m) for x, y in tied for m in (0.0, 1.0, 3.0))
+    return grid
+
+
+def _ks2_d(x: list, y: list) -> tuple[Fraction, Fraction]:
+    """(D+, D-) exactly: F1 - F2 and F2 - F1 at every value of either sample (the
+    empirical cdfs only change there), and 0."""
+    n1, n2 = len(x), len(y)
+    diffs = [
+        Fraction(sum(u <= t for u in x), n1) - Fraction(sum(u <= t for u in y), n2)
+        for t in set(x) | set(y)
+    ]
+    return max([Fraction(0), *diffs]), max([Fraction(0)] + [-v for v in diffs])
+
+
+def _ks2_statistic(x: list, y: list, method: float) -> Fraction:
+    d_plus, d_minus = _ks2_d(x, y)
+    if method == 0:
+        return d_minus
+    if method == 1:
+        return d_plus
+    return max(d_plus, d_minus)
+
+
+def _ks2_exact_sf(n1: int, n2: int, d: Fraction) -> Fraction:
+    """P(D >= d) exactly when no value repeats: under the null hypothesis every one of
+    the C(n1 + n2, n1) orders of the pooled sample is equally likely, and an order is
+    a lattice path from (0, 0) to (n1, n2), one step in i for each x and in j for each
+    y; D < d exactly when |i / n1 - j / n2| < d at every point of the path. The paths
+    that stay inside are counted in exact integers (|i n2 - j n1| < d n1 n2)."""
+    bound = d * n1 * n2
+    row = [1] + [0] * n2
+    for j in range(1, n2 + 1):
+        row[j] = row[j - 1] if abs(j * n1) < bound else 0
+    for i in range(1, n1 + 1):
+        row[0] = row[0] if abs(i * n2) < bound else 0
+        for j in range(1, n2 + 1):
+            row[j] = row[j] + row[j - 1] if abs(i * n2 - j * n1) < bound else 0
+    return 1 - Fraction(row[n2], math.comb(n1 + n2, n1))
+
+
+def _mp_hodges(d: Fraction, n1: int, n2: int) -> mpmath.mpf:
+    """Hodges's eq. 5.3 with m the larger and n the smaller size."""
+    m, n = max(n1, n2), min(n1, n2)
+    z = _mp_frac(d) * mpmath.sqrt(mpmath.mpf(m * n) / (m + n))
+    return mpmath.exp(-2 * z * z - 2 * z * (m + 2 * n) / (3 * mpmath.sqrt(m * n * (m + n))))
+
+
+def _mp_ks2_pvalue(n1: int, n2: int, d: Fraction, method: float) -> mpmath.mpf:
+    if method in (0, 1):
+        return _mp_hodges(d, n1, n2)
+    if method == 2:
+        return _mp_frac(_ks2_exact_sf(n1, n2, d))
+    if d == 0:
+        return mpmath.mpf(1)  # 1 - K(0); the theta form divides by t
+    t = _mp_frac(d) * mpmath.sqrt(mpmath.mpf(n1 * n2) / (n1 + n2))
+    return _mp_kolmogorov_limit_sf(t)
+
+
+def _mp_ks_2samp(x: list, y: list, method: mpmath.mpf):
+    xs, ys = [float(v) for v in x], [float(v) for v in y]  # the inputs are doubles
+    d = _ks2_statistic(xs, ys, float(method))
+    return _mp_frac(d), _mp_ks2_pvalue(len(xs), len(ys), d, float(method))
+
+
+def ks_2samp_rounding_bound(x: tuple, y: tuple, method: float) -> float:
+    """max(kappa_p, 1) (kappa_D + n) 2^-53 with n = n1 + n2. A careful method forms
+    D = i / n1 - j / n2 with two rounded quotients and a rounded difference, so it is
+    off by up to (i / n1 + j / n2 + D) 2^-53 at the maximising (i, j): kappa_D =
+    (F1 + F2 + D) / D there, and 0 for D = 0 (equal quotients round alike). kappa_p:
+    1 for the exact method (it depends on d only through the whole number d n1 n2);
+    |d p'(d) / p| otherwise, from a central difference at 40 digits."""
+    xs, ys = [float(v) for v in x], [float(v) for v in y]
+    n1, n2 = len(xs), len(ys)
+    d = _ks2_statistic(xs, ys, method)
+    if d == 0:
+        kappa_d = mpmath.mpf(0)
+    else:
+        f_sum = max(
+            Fraction(sum(u <= t for u in xs), n1) + Fraction(sum(u <= t for u in ys), n2)
+            for t in set(xs) | set(ys)
+            if abs(Fraction(sum(u <= t for u in xs), n1) - Fraction(sum(u <= t for u in ys), n2))
+            == d
+        )
+        kappa_d = _mp_frac((f_sum + d) / d)
+    kappa_p = mpmath.mpf(1)
+    if method != 2 and d != 0:
+        with mpmath.workdps(40):
+            step = d / 10**12
+            p = _mp_ks2_pvalue(n1, n2, d, method)
+            p_up = _mp_ks2_pvalue(n1, n2, d + step, method)
+            p_down = _mp_ks2_pvalue(n1, n2, d - step, method)
+            kappa_p = abs((p_up - p_down) / (2 * _mp_frac(step)) * _mp_frac(d) / p)
+    return float(max(kappa_p, 1) * (kappa_d + n1 + n2) * mpmath.mpf(2) ** -53)
+
+
+def _sc_ks_2samp(x: list[float], y: list[float], method: float) -> tuple[float, float]:
+    alternative, mode = _KS2_METHODS[method]
+    r = st.ks_2samp(x, y, alternative=alternative, method=mode)
+    if method != 3:
+        return float(r.statistic), float(r.pvalue)
+    # SciPy's two-sided asymptotic p-value is the exact one-sample distribution at
+    # round(m n / (m + n)), not Kolmogorov's limit; its limit is kstwobign.
+    en = len(x) * len(y) / (len(x) + len(y))
+    return float(r.statistic), float(st.kstwobign.sf(r.statistic * math.sqrt(en)))
+
+
+KS_2SAMP = Spec(
+    name="ks_2samp",
+    description=(
+        "Two-sample Kolmogorov-Smirnov test of x (size n1) against y (size n2), with "
+        "empirical cdfs F1 and F2 and m >= n the larger and smaller size: the statistic and "
+        "its p-value; method 0 less (D- = max(F2 - F1)) and 1 greater (D+ = max(F1 - F2)), "
+        "both with Hodges's approximation p = exp(-2 z^2 - 2 z (m + 2 n) / (3 sqrt(m n "
+        "(m + n)))), z = d sqrt(m n / (m + n)) (Hodges 1957, eq. 5.3); two-sided with "
+        "D = max(D+, D-) and p 2 exact P(D >= d) without ties, 3 asymptotic 1 - K(d sqrt(m n "
+        "/ (m + n))), K Kolmogorov's limit distribution"
+    ),
+    inputs=("x", "y", "method"),
+    outputs=("statistic", "pvalue"),
+    tolerance=5e-12,
+    tolerance_reason=(
+        "For both outputs, by the rule of ttest_1samp. A careful method forms D = i / n1 - "
+        "j / n2 with two rounded quotients and a rounded difference, so kappa_D = (F1 + F2 + "
+        "D) / D at the maximising value (0 for D = 0, where equal quotients round alike); the "
+        "exact p-value depends on d only through the whole number d n1 n2 (kappa_p = 1), the "
+        "asymptotic ones add kappa_p = |d p'(d) / p|; n = n1 + n2 counts generously the rounded "
+        "operations (ks_2samp_rounding_bound). The largest bound max(kappa_p, 1) (kappa_D + n) "
+        "2^-53 on this grid is 4.6e-12 (n1 = 101, n2 = 100, the samples apart, D = 1, Hodges's "
+        "p = 8.3e-45, kappa_p = 202); 5e-12 is the smallest round value above it (tested). "
+        "SciPy returns 1.1e-16 instead of D = 0 at 3 tied points; its worst error elsewhere is "
+        "1.4e-14"
+    ),
+    grid_description=(
+        "x the first n1 and y the next n2 of v_i = (7919 i) mod 1000, x shifted by d in "
+        "{-1000.5, -200.5, 0.5, 150.5, 1000.5} (all values distinct), and the interleaved "
+        "x_i = 2 n2 i, y_j = 2 n1 j - 1: sizes (n1, n2) in {(1, 1), (1, 8), (8, 1), (3, 6), "
+        "(6, 3), (4, 5), (8, 8), (8, 20), (20, 8), (10, 25), (50, 50), (100, 100)} with methods "
+        "0 to 3, and (101, 100) with methods 0, 1 and 3 (statrs's exact method stops at "
+        "n1 n2 = 10000); tied samples (v_i rounded down to a multiple of 200, shifts in "
+        "{-1000, -200, 0, 200, 1000}, sizes (4, 5), (8, 8), (10, 25)) and y = x repeated k "
+        "times for (n1, k) in {(3, 1), (3, 2), (10, 1), (10, 3)} (D = 0), with methods 0, 1 and "
+        "3. D from 0 (73 points) to 1, p-value from 2.2e-59 to 1"
+    ),
+    grid=_ks2_grid,
+    mpmath_fn=_mp_ks_2samp,
+    scipy_name="scipy.stats.ks_2samp (method 3: scipy.stats.kstwobign.sf)",
+    scipy_fn=_sc_ks_2samp,
+)
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -4765,7 +4962,7 @@ ALL: tuple[Spec, ...] = (
     GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF, LAPLACE_CDF, LAPLACE_SF, LAPLACE_PPF,
     CAUCHY_CDF, CAUCHY_SF, CAUCHY_PPF, LEVY_CDF, LEVY_SF, LEVY_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
-    SKEWTEST, MANNWHITNEYU, FISHER_EXACT, KS_1SAMP,
+    SKEWTEST, MANNWHITNEYU, FISHER_EXACT, KS_1SAMP, KS_2SAMP,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip
