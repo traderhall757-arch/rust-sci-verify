@@ -3086,3 +3086,144 @@ def test_fisher_exact_rounding_bound_matches_the_tolerance_reason():
     assert 7.7e-14 < worst <= functions.FISHER_EXACT.tolerance
     a, b, c, d, _ = point
     assert (a + b, c + d, a + c) == (1000, 900, 700)
+
+
+def _steck_band_probability(lower: list, upper: list) -> Fraction:
+    """P(lower_i < U_(i) < upper_i for every i) for the order statistics of n uniforms,
+    exactly: n! det(m_ij), m_ij = (upper_i - lower_j)_+^(j - i + 1) / (j - i + 1)! for
+    j >= i - 1, else 0 (Steck 1971). A different route from the Marsaglia, Tsang and Wang
+    matrix power and from the Birnbaum and Tingey sum."""
+    n = len(lower)
+    m = [
+        [
+            max(upper[i] - lower[j], Fraction(0)) ** (j - i + 1) / math.factorial(j - i + 1)
+            if j - i + 1 >= 0
+            else Fraction(0)
+            for j in range(n)
+        ]
+        for i in range(n)
+    ]
+    det = Fraction(1)
+    for c in range(n):
+        pivot = next(r for r in range(c, n) if m[r][c] != 0)
+        if pivot != c:
+            m[c], m[pivot] = m[pivot], m[c]
+            det = -det
+        det *= m[c][c]
+        for r in range(c + 1, n):
+            f = m[r][c] / m[c][c]
+            if f:
+                m[r] = [a - f * b for a, b in zip(m[r], m[c], strict=True)]
+    return math.factorial(n) * det
+
+
+def _ks_two_sided_band(n: int, d: Fraction) -> tuple[list, list]:
+    """D < d exactly when i / n - d < U_(i) < (i - 1) / n + d for every i."""
+    lower = [max(Fraction(0), Fraction(i, n) - d) for i in range(1, n + 1)]
+    upper = [min(Fraction(1), Fraction(i - 1, n) + d) for i in range(1, n + 1)]
+    return lower, upper
+
+
+@pytest.mark.parametrize(
+    ("n", "d"),
+    [(2, 0.3), (5, 0.3), (13, 0.31), (20, 0.2), (20, 0.4), (50, 0.15), (50, 0.4)],
+)
+def test_ks_two_sided_exact_matches_steck(n, d):
+    d = Fraction(d)
+    true = 1 - _steck_band_probability(*_ks_two_sided_band(n, d))
+    with mpmath.workdps(40):
+        assert close(functions._mp_kolmogorov_sf(n, d), functions._mp_frac(true), 38)
+
+
+def test_ks_two_sided_exact_matches_steck_where_scipy_is_wrong():
+    # SciPy's worst point up to n = 140 (3.6e-12 off, n = 100, x = (7/8) z) and
+    # every exact point at n = 150, where SciPy switches to an approximation (up to
+    # 2.6e-6 off): the reference has no second opinion there but Steck's determinant.
+    samples = [functions._ks_sample(100, 7 / 8, False)]
+    samples += [x for x, m in functions._ks_grid() if len(x) == 150 and m == 2]
+    assert len(samples) == 13
+    for x in samples:
+        n = len(x)
+        d = functions._ks_statistic(x, 2.0)
+        true = 1 - _steck_band_probability(*_ks_two_sided_band(n, d))
+        with mpmath.workdps(40):
+            assert close(functions._mp_kolmogorov_sf(n, d), functions._mp_frac(true), 38)
+
+
+@pytest.mark.parametrize(("n", "d"), [(1, 0.4), (3, 0.5), (10, 0.05), (10, 0.37), (30, 0.6)])
+def test_ks_one_sided_exact_matches_steck(n, d):
+    # D+ < d exactly when U_(i) > i / n - d for every i (no upper bound).
+    d = Fraction(d)
+    lower = [max(Fraction(0), Fraction(i, n) - d) for i in range(1, n + 1)]
+    true = 1 - _steck_band_probability(lower, [Fraction(1)] * n)
+    with mpmath.workdps(40):
+        assert close(functions._mp_smirnov(n, d), functions._mp_frac(true), 38)
+
+
+def test_ks_two_sided_exact_matches_the_published_value():
+    # Marsaglia, Tsang and Wang (2003), section 4: K(10, 0.274) = 0.6284796154565043.
+    with mpmath.workdps(30):
+        cdf = functions._mp_kolmogorov_cdf_mtw(10, Fraction(0.274))
+    assert float(cdf) == 0.6284796154565043
+
+
+def test_ks_two_sided_exact_matches_closed_forms():
+    with mpmath.workdps(40):
+        # n = 1: D = max(x, 1 - x), so P(D >= d) = 2 (1 - d) for d >= 1/2.
+        for d in (Fraction(1, 2), Fraction(3, 5), Fraction(0.93)):
+            assert close(functions._mp_kolmogorov_sf(1, d), functions._mp_frac(2 * (1 - d)), 38)
+        # d >= 1 - 1/n: P(D >= d) = 2 (1 - d)^n; 1/(2n) <= d <= 1/n: P(D < d) =
+        # n! (2 d - 1/n)^n (Ruben and Gambino 1982).
+        for n, d in ((5, Fraction(0.85)), (20, Fraction(0.97))):
+            assert close(
+                functions._mp_kolmogorov_sf(n, d), functions._mp_frac(2 * (1 - d) ** n), 38
+            )
+        for n, d in ((5, Fraction(0.15)), (20, Fraction(0.04)), (40, Fraction(0.02))):
+            cdf = math.factorial(n) * (2 * d - Fraction(1, n)) ** n
+            assert close(functions._mp_kolmogorov_sf(n, d), functions._mp_frac(1 - cdf), 38)
+
+
+def test_ks_two_sided_identity_matches_the_matrix_route():
+    # Above 1/2 the reference takes 2 P(D+ >= d); the matrix route must agree there.
+    with mpmath.workdps(40):
+        for n, d in ((5, Fraction(0.55)), (10, Fraction(0.7)), (30, Fraction(0.5))):
+            with mpmath.extradps(40):
+                matrix = 1 - functions._mp_kolmogorov_cdf_mtw(n, d)
+            assert close(functions._mp_kolmogorov_sf(n, d), matrix, 38)
+
+
+@pytest.mark.parametrize("t", [0.2, 0.5, 0.9, 1.0, 1.5, 3.0, 8.0])
+def test_ks_limit_matches_the_theta_function(t):
+    # 1 - K(t) = 1 - theta_4(0, e^(-2 t^2)), at 60 extra digits for the cancellation
+    # (1 - K(8) = 5e-56).
+    with mpmath.workdps(40):
+        t = mpmath.mpf(t)
+        ours = functions._mp_kolmogorov_limit_sf(t)
+        with mpmath.extradps(60):
+            theta = 1 - mpmath.jtheta(4, 0, mpmath.exp(-2 * t * t))
+        assert close(ours, theta, 38)
+
+
+def test_ks_statistic_matches_counting():
+    # D+ and D- against the empirical cdf by counting: F_n(x_j) = #{x_i <= x_j} / n just
+    # at x_j, #{x_i < x_j} / n just below it.
+    for n, c, high in ((1, 1.0, False), (10, 7 / 8, True), (100, 1 / 2, False)):
+        x = [Fraction(v) for v in functions._ks_sample(n, c, high)]
+        d_plus = max(Fraction(sum(u <= v for u in x), n) - v for v in x)
+        d_minus = max(v - Fraction(sum(u < v for u in x), n) for v in x)
+        assert functions._ks_d(functions._ks_sample(n, c, high)) == (d_plus, d_minus)
+
+
+def test_ks_approximate_pvalue_is_capped_at_one():
+    x = functions._ks_sample(20, 1.0, False)
+    with mpmath.workdps(30):
+        d = functions._ks_statistic(x, 4.0)
+        assert 2 * functions._mp_smirnov(20, d) > 1
+        _, p = functions._mp_ks_1samp(mp(*x), mpmath.mpf(4))
+    assert p == 1
+
+
+def test_ks_rounding_bound_matches_the_tolerance_reason():
+    worst, point = max((functions.ks_1samp_rounding_bound(*p), p) for p in functions._ks_grid())
+    assert 3.3e-12 < worst <= functions.KS_1SAMP.tolerance
+    assert point[0] == functions._ks_sample(150, 1 / 2, False)

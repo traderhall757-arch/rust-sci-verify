@@ -782,7 +782,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 30: statrs Fisher's exact test** (statrs
   `stats_tests::fisher::fishers_exact_with_odds_ratio`;
-  [PR #44](https://github.com/traderhall757-arch/rust-sci-verify/pull/44), open):
+  [PR #44](https://github.com/traderhall757-arch/rust-sci-verify/pull/44), merged):
   - New dataset `fisher_exact` (411 points: published tables (SciPy's
     documentation, Fisher's tea tasting, statrs's fisher test cases), the first 12
     tables with another table at most 1e-4 more probable, and tables by their
@@ -809,17 +809,50 @@ _Updated at the end of every session. Start here._
     all failures from these causes; a bit-exact copy with all four remedies
     passes every grid, random and near-tie point.
 
+- **Milestone 4, part 31: statrs one-sample Kolmogorov-Smirnov test** (statrs
+  `stats_tests::ks_test::ks_onesample` against `Uniform(0, 1)`;
+  PR open, link below in "Next"):
+  - New dataset `ks_1samp` (544 points: scrambled samples z_i =
+    ((7919 (i + 1)) mod 2048 + 1/2) / 2048 pushed towards 0 or 1 by c in
+    {31/32 .. 1/2}, and evenly spread samples (2 i - 1) / (2 n), for n from
+    1 to 150 with all five methods; n = 1100 without the exact one; outputs
+    statistic and p-value; tolerance 5e-12 from the rounding bound,
+    largest 3.3e-12, tested). Reference: the statistic exactly in rationals;
+    the one-sided p-value from the Birnbaum and Tingey sum in exact integer
+    arithmetic; two-sided exact from 2 P(D+ >= d) for d >= 1/2 and the
+    Marsaglia, Tsang and Wang matrix below; the limit distribution from its
+    two series. Tested (to 38 digits) against Steck's determinant in exact rationals (n up
+    to 150), the published K(10, 0.274), closed forms, `mpmath.jtheta` and
+    counting. SciPy is wrong at 4 exact points at n = 150 (up to 2.6e-6; it
+    approximates above n = 140).
+  - `ks_onesample` fails 30 points: **finding 053** (high), approved by
+    Claude after the checklist. Four causes: the exact two-sided p-value is
+    `1 - cdf` (2.7e-15 instead of 6.6e-27); `n.powi(n)` overflows from
+    n = 144, so the exact method gives NaN (or a spurious 1) for 144 to 169
+    values; the
+    one-sided and approximate p-values overflow C(n, j) from n = 1030 (1 or
+    NaN; 1 instead of 0.117) and underflow factors from about n = 700 when
+    p < 1e-89; the asymptotic series stops at a term below 1e-10 (up to
+    6.8e-11 off where p = 1).
+  - Random scans (seeds 20261031, 3,000 samples, and 20261101, 1,000 nearly
+    even samples): all failures from these causes; a copy with remedies for
+    causes 2 to 4 passes everything except cause 1 below d = 1/2 (no simple
+    remedy; absolute error at most 4e-15) and 2 points below 1e-303.
+  - Guardrail change: `scripts/select_datasets.py` allows the standard
+    library's `fractions` import in `functions.py` (exact rationals, no state).
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 30, statrs
-   `fishers_exact`, findings 051 and 052).
+1. **Owner: review and merge the open PR** (Milestone 4 part 31, statrs
+   `ks_onesample`, finding 053): PR_LINK.
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Remaining statrs hypothesis tests** (suggested next): `ks_onesample` /
-     two-sample (exact distributions), `anderson_darling` (its p-value
+   - **Remaining statrs hypothesis tests** (suggested next): `ks_twosample`
+     (exact and asymptotic methods; the one-sample reference's Steck
+     determinant and limit series can be reused), `anderson_darling` (its p-value
      is an empirical approximation by design: check the statistic, and the
      p-value only against the same published formula). Each needs its exact
      distribution in mpmath. Expect the `1 - cdf` pattern of findings
-     026 to 029 and 051.
+     026 to 029, 051 and 053.
    - puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
      and finding 002's NaN may break it) on `gamma_ppf`; puruspe `invbetai`
      on `betaincinv`; puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
@@ -841,7 +874,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 052 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 053 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -886,7 +919,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s; `fisher_exact` about 2 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s; `fisher_exact` about 2 s; `ks_1samp` about 8 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).

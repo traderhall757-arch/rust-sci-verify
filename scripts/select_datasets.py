@@ -41,7 +41,16 @@ TESTS = "reference/tests/"
 EVERYTHING = (".github/workflows/ci.yml", "scripts/select_datasets.py")
 # The only imports functions.py may have; anything else could reach code or
 # state the analysis does not see.
-IMPORTS = {"itertools", "math", "mpmath", "numpy", "scipy.special", "scipy.stats", ".spec"}
+IMPORTS = {
+    "fractions",
+    "itertools",
+    "math",
+    "mpmath",
+    "numpy",
+    "scipy.special",
+    "scipy.stats",
+    ".spec",
+}
 # Names and attributes that look up module contents by string.
 DYNAMIC_NAMES = {"eval", "exec", "compile", "globals", "locals", "vars", "__import__", "__name__"}
 DYNAMIC_ATTRS = {"__dict__", "__globals__", "__builtins__", "modules", "import_module"}
