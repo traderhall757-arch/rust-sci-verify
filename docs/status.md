@@ -811,7 +811,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 31: statrs one-sample Kolmogorov-Smirnov test** (statrs
   `stats_tests::ks_test::ks_onesample` against `Uniform(0, 1)`;
-  PR open, link below in "Next"):
+  [PR #45](https://github.com/traderhall757-arch/rust-sci-verify/pull/45), open):
   - New dataset `ks_1samp` (544 points: scrambled samples z_i =
     ((7919 (i + 1)) mod 2048 + 1/2) / 2048 pushed towards 0 or 1 by c in
     {31/32 .. 1/2}, and evenly spread samples (2 i - 1) / (2 n), for n from
@@ -844,7 +844,7 @@ _Updated at the end of every session. Start here._
 ## Next
 
 1. **Owner: review and merge the open PR** (Milestone 4 part 31, statrs
-   `ks_onesample`, finding 053): PR_LINK.
+   `ks_onesample`, finding 053): [PR #45](https://github.com/traderhall757-arch/rust-sci-verify/pull/45).
 2. **Milestone 4, continued** (next session; one family per PR):
    - **Remaining statrs hypothesis tests** (suggested next): `ks_twosample`
      (exact and asymptotic methods; the one-sample reference's Steck
