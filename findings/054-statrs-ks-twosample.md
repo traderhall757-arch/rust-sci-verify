@@ -16,14 +16,19 @@
      the empirical cdfs are built by adding 1/n1 and 1/n2 once per value,
      so they end slightly off 1 (for example 0.9999999999999999) and their
      difference is rounding noise where it should be exactly 0. A one-sided
-     statistic whose true value is 0 (all of x above y for D-, for example)
-     comes out as 5.6e-17 to 3.3e-16, and its p-value as 0.9999999999999997
-     instead of 1. With ties, the two-sided D = 0 is affected the same way.
+     statistic whose true value is 0 (D- when all of x is below y, for
+     example) comes out as 5.6e-17 to 3.3e-16, and its p-value as
+     0.9999999999999997 instead of 1. With ties, the two-sided D = 0 is
+     affected the same way. In large samples (sizes near 1e5, off the grid)
+     the long sums also move statistics above 0, by up to 4.0e-11.
   2. **Never returns** (4 points, method 3, samples with equal empirical
      cdfs, D = 0): the asymptotic series stops only when a term
      exp(-2 k^2 t^2) drops below 1e-10. At t = 0 every term is 1, so the
-     loop never ends; at the t of about 1e-16 that cause 1 leaves instead
-     of 0 it needs about 1e16 terms (months). Without ties D is never 0, so
+     loop never ends. At the t of about 1e-16 that cause 1 leaves instead
+     of 0 it needs more than 1e16 terms, and the term counter `k` is a
+     double that stops growing at 2^53 (9.0e15), so it never ends either
+     (the grid's two such points need about 2.2e16 terms); with larger
+     noise (about 1e-15) it may end after weeks. Without ties D is never 0, so
      only samples with repeated values reach this, for example y = x.
   3. **Exact p-value as 1 - cdf** (10 points, n1 = 8 to 100, relative
      errors from 5.4e-11 to 2.7e44): `TwoSidedExact` returns
@@ -88,8 +93,9 @@ Second opinion: SciPy (`scipy.stats.ks_2samp` with the matching
 SciPy's statistic, because SciPy's own two-sided asymptotic p-value uses a
 different approximation) agrees with mpmath within the tolerance at every
 point of the dataset except 3 tied points, where SciPy's statistic is
-1.1e-16 instead of 0 (the report counts them as "both wrong"; one is a
-cause 2 point). Its worst error elsewhere is 1.4e-14. The exact p-value
+1.1e-16 instead of 0: the report counts 2 of them as "both wrong" (one
+cause 1 and one cause 2 point) and the third as "SciPy wrong", where
+statrs gives exactly 0. Its worst error elsewhere is 1.4e-14. The exact p-value
 also agrees with the Gnedenko and Korolyuk closed form for equal sizes and
 with enumeration of every order for small sizes (reference tests).
 
@@ -120,7 +126,12 @@ with enumeration of every order for small sizes (reference tests).
    copy of statrs's series with an iteration counter (identical results to
    statrs wherever it returns). 330 fail:
    - 193 through cause 1 (methods 0 and 1, true D = 0, statrs 1.4e-17 to
-     7.7e-15); no statistic with a true value above 0 fails.
+     7.7e-15); no statistic with a true value above 0 fails at these sizes
+     (up to 100). Larger samples (12 normal pairs, `default_rng(20261103)`,
+     sizes (1000, 1000) to (100000, 30000), method 3) show that cause 1 also
+     moves statistics above 0 once the sums get long: up to 4.0e-11 relative
+     at (30000, 100000), beyond 5e-12 and beyond that point's own rounding
+     bound (1.5e-11); at (1000, 1000) the error is below 1e-15.
    - 102 through cause 2 (method 3, all with true D = 0: 39 where statrs's
      D is exactly 0, 63 where it is 1.1e-16 to 1.3e-15).
    - 28 through cause 3 (true p from 1.1e-10 to 6.5e-3, absolute errors up
@@ -151,11 +162,16 @@ Cause 1 also moves the statistic by a few units in the last place where it
 is not 0 (1.0000000000000007 instead of 1 at n1 = n2 = 100), far below the
 tolerance; those points pass.
 
-statrs documents `TwoSidedExact` as Schröer and Trenkler (1995) "accounting
-for ties", but the code never looks at ties: it counts the orders of an
-untied pooled sample (as SciPy does). With ties its p-value is therefore
-the untied one. Tied samples are not run with method 2 on the grid, so
-this is not judged; it is a documentation mismatch seen in the source.
+statrs documents `TwoSidedExact` as using Schröer and Trenkler (1995):
+"This paper builds on top of Hodges (1957) accounting for ties." The code
+does not use ties: the exact routine receives only d and the two sizes, so
+it counts the orders of an untied pooled sample (as SciPy does), and unlike
+`ks_onesample` it does not refuse tied data. With ties its p-value is
+therefore the untied one. Tied samples are not run with method 2 on the
+grid, so this is not judged; it is seen in the source only.
+
+Unlike `ks_onesample`, `ks_twosample` never clamps the p-value to [0, 1],
+which is why -6.0e-15 (cause 3) and 1.0000000000293348 (cause 4) come out.
 
 Hodges's eq. 5.3 and the limit distribution are approximations by design;
 the functions checked are those formulas, not the finite-sample

@@ -855,7 +855,8 @@ _Updated at the end of every session. Start here._
     except a statistic of 1.1e-16 instead of 0 at 3 tied points.
   - `ks_twosample` fails 30 points: **finding 054** (high), approved by
     Claude after the checklist. Four causes: the empirical cdfs are summed
-    1/n at a time, so a statistic that should be 0 is 1e-16 to 3e-16;
+    1/n at a time, so a statistic that should be 0 is 5.6e-17 to
+    3.3e-16 (and statistics above 0 lose up to 4.0e-11 at sizes near 1e5);
     the two-sided asymptotic method **never returns** when the statistic is
     0 or that rounding noise (samples with equal empirical cdfs, which need
     ties); the exact p-value is `1 - cdf` (-6.0e-15 instead of 2.2e-59);
