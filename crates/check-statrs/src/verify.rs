@@ -8,6 +8,7 @@ use statrs::distribution::{
     InverseGamma, Laplace, Levy, LogNormal, Normal, Pareto, StudentsT, Uniform, Weibull,
 };
 use statrs::function::{beta, erf, gamma};
+use statrs::stats_tests::anderson_darling::anderson_darling;
 use statrs::stats_tests::chisquare::chisquare;
 use statrs::stats_tests::f_oneway::f_oneway;
 use statrs::stats_tests::fisher::fishers_exact_with_odds_ratio;
@@ -1027,6 +1028,22 @@ fn statrs_matches_reference() {
                 ks_method(p.scalar("method")),
                 NaNPolicy::Error,
             ))
+        }),
+        Check {
+            function: "statrs::stats_tests::anderson_darling::anderson_darling",
+            dataset: "anderson",
+            expected: &[Expected {
+                finding: "055-statrs-anderson-darling",
+                points: expected::ANDERSON,
+            }],
+        }
+        .run(|p| {
+            let x = &p.inputs["x"];
+            statistic_and_pvalue(if p.scalar("dist") == 0.0 {
+                anderson_darling(x, &Uniform::new(0.0, 1.0).expect("valid parameters"))
+            } else {
+                anderson_darling(x, &exponential())
+            })
         }),
         // Near the end: it loops forever at 7 points (finding 020); the
         // abandoned threads only share the CPU with `t_ppf`, whose correct

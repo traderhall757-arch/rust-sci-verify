@@ -843,7 +843,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 32: statrs two-sample Kolmogorov-Smirnov test** (statrs
   `stats_tests::ks_test::ks_twosample`;
-  [PR #46](https://github.com/traderhall757-arch/rust-sci-verify/pull/46), open):
+  [PR #46](https://github.com/traderhall757-arch/rust-sci-verify/pull/46), merged):
   - New dataset `ks_2samp` (363 points: the Mann-Whitney samples with
     half-integer shifts and an interleaved pair, sizes (1, 1) to (100, 100)
     with all four methods and (101, 100) without the exact one; tied samples
@@ -869,16 +869,41 @@ _Updated at the end of every session. Start here._
     (`run_isolated`), so the 4 endless calls are killed instead of left
     spinning; this adds about 20 s (4 x the 5 s limit) to the test.
 
+- **Milestone 4, part 33: statrs Anderson-Darling test** (statrs
+  `stats_tests::anderson_darling::anderson_darling`; PR to come, open):
+  - New dataset `anderson` (128 points: the KS one-sample patterns against
+    the uniform distribution, n = 1 to 100, plus 4 samples far from uniform;
+    exponential samples 1/2 + w z, n = 5, 20, 100, with the largest value
+    moved to 10 ... 800; outputs statistic and p-value; tolerance 3e-12 from
+    the rounding bound, largest 2.9e-12, tested). Reference: A^2 with log F
+    and log S formed separately (tested against the defining integral in
+    closed form and by quadrature); the p-value is D'Agostino and Stephens's
+    published formula evaluated exactly at the true A^2 (it is an empirical
+    fit, so only the computation is checked; no grid point lies within 0.024
+    of a branch boundary, tested). SciPy (`goodness_of_fit` statistic, the
+    formula in doubles for the p-value) is within 2.1e-13 everywhere.
+  - `anderson_darling` fails 48 points: **finding 055** (high), approved by
+    Claude after the checklist. It forms the upper tail as `1 - cdf`:
+    statistic errors from 3.5e-12 (x = 20) to 1.1e-3 (x = 36) and p-value
+    errors up to 5.6e-2; inf and NaN from x = 37.43, where the true A^2 is
+    an ordinary number. Every uniform sample passes.
+  - Random scan (seed 20261103, 3,000 samples): 570 exponential failures,
+    all with a value of 9.07 or more; none of 1,500 uniform samples. A copy
+    using `sf` passes all of them below x = 709; beyond that e^-x itself
+    leaves the double range, and only a log-tail method (which statrs's
+    trait lacks) would work.
+  - Not counted, in the finding's notes: the p-value formula is for normal
+    samples with estimated parameters, and statrs applies it to any
+    distribution; it rises again above z = 153.47 (a worse fit gets a
+    larger p-value) and exceeds 1 above z = 306.71.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 32, statrs
-   `ks_twosample`, finding 054): [PR #46](https://github.com/traderhall757-arch/rust-sci-verify/pull/46).
+1. **Owner: review and merge the open PR** (Milestone 4 part 33, statrs
+   `anderson_darling`, finding 055): PR to come.
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Remaining statrs hypothesis test** (suggested next):
-     `anderson_darling` (its p-value is an empirical approximation by
-     design: check the statistic, and the p-value only against the same
-     published formula).
-   - puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
+   - All statrs hypothesis tests are now checked. **Suggested next:**
+     puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
      and finding 002's NaN may break it) on `gamma_ppf`; puruspe `invbetai`
      on `betaincinv`; puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
    - Not yet listed anywhere: statrs `Triangular` and `Uniform` (closed form,
@@ -899,7 +924,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 054 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 055 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -944,7 +969,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s; `fisher_exact` about 2 s; `ks_1samp` about 8 s; `ks_2samp` under 1 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s; `fisher_exact` about 2 s; `ks_1samp` about 8 s; `ks_2samp` under 1 s; `anderson` under 1 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).
