@@ -53,8 +53,11 @@
      between groups 2, 3 and 6 is a matter of which error is larger: with
      a correctly rounded log-gamma in `afac` instead of `math.lgamma`, the
      exact-P copy moves (1 - 1e-5, 2, 1e4) to passing and
-     (1 - 1e-5, 1, 1e4) to failing (groups 2 and 3 would be 68 and 102).
-     The lists are not affected: the harness checks their union.
+     (1 - 1e-5, 1, 1e4) to failing (and two points at (a, b) = (1, 1e4),
+     p = 1 - 1e-10 and 1 - 1e-15, move between groups 2 and 3 through
+     the a = 1 start effect described in group 2). On the grid 10 points
+     of group 6 at p = 1 - 1e-5 sit at this floor. The lists are not
+     affected: the harness checks their union.
   4. **p = 5e-324** (31 points, a >= 2): p is the smallest subnormal, and
      the representable values of P near it are 4.9e-324 apart, so the
      step's err = P - p is known only to about 100%, and x only to about
@@ -86,11 +89,12 @@
      `betai`'s prefactor made exact (finding 001, bug 4: built from
      puruspe's `ln_gamma`, [finding 033](033-puruspe-ln-gamma.md)) 663 of
      the 696 pass; the other 33, 27 of them at b = 1e4, still miss by
-     2e-13 to 6.9e-12 (e.g. (0.1, 0.1, 1e4) at 3.3e-12, as (p, a, b)) from other
-     rounding inside `betai`, not traced further (likely b ln(1 - x)
-     with 1 - x rounded). (The exact prefactor here is the double nearest
-     the mpmath value; `betai` with a, b > 3000 is left as is.) At 420 of the 698 the loop also uses all 10
-     steps without meeting its stopping test. The last 2 points (a = 1,
+     2e-13 to 6.9e-12 (e.g. `invbetai(0.1, 0.1, 1e4)` at 3.3e-12) from
+     other rounding inside `betai`, not traced further (likely
+     b ln(1 - x) with 1 - x rounded). The exact prefactor here is the
+     double nearest the mpmath value; `betai` with a, b > 3000 is left as
+     is. At 420 of the 698 the loop also uses all 10 steps without
+     meeting its stopping test. The last 2 points (a = 1,
      b = 10 and 100, p = 1 - 1e-5; 2.8e-13 and 3.9e-13) are at group 3's
      floor: every x within 2.6e-13 (4.6e-13 for b = 100) of the root gives
      the same rounded P, wider than the tolerance, so where the loop
@@ -158,8 +162,9 @@ b = 1, x = 1 - (1 - p)^(1/b) for a = 1, x = 1/2 at p = 1/2 for a = b.
 3. **Second opinion**: see "Expected". Where SciPy is wrong too, the
    table's row (5e-324, 1000, 1000) was checked by a second route,
    `mpmath.betainc` at 40 digits: I at the reference x is
-   p (1 + 6.8e-14), and the next double up gives p (1 + 2.4e-13), so the
-   reference is the closest double.
+   p (1 + 6.8e-14), the next double down gives p (1 - 1.0e-13) and the
+   next double up p (1 + 2.4e-13), so the reference is the closest
+   double.
 4. **Off-grid**: 3,000 random points (Python `random.Random(20261105)`):
    a and b = 10^u with u uniform in [-1, 4], 6 significant digits; p
    uniform in (0, 1) (40%), p = 10^v with v uniform in [-300, -1] (30%),
@@ -175,8 +180,8 @@ b = 1, x = 1 - (1 - p)^(1/b) for a = 1, x = 1/2 at p = 1/2 for a = b.
      remedy alone, 13 also need group 2's;
    - group 4: none (the scan's smallest p is about 1e-300);
    - group 5: 153, 22 of them panics;
-   - group 6: 1,233 that pass when P is exact, up to 1.4e-10 (1 of them,
-     p near 1, is at group 3's floor like group 6's last 2 grid points).
+   - group 6: 1,233 that pass when P is exact, up to 1.4e-10; at 17 of
+     them, all near p = 1, group 3's floor is also above the tolerance.
 5. **Root cause** (from the source, `src/beta.rs`, `invbetai`, a port of
    Numerical Recipes' `invbetai`), confirmed with copies (scratch, not
    committed):
@@ -196,8 +201,9 @@ b = 1, x = 1 - (1 - p)^(1/b) for a = 1, x = 1/2 at p = 1/2 for a = b.
      groups 1 to 4, 3 of group 5 where betai's error comes first
      (a = b = 1e4 at p = 5e-324, 1 - 1e-10 and 1 - 1e-15), and 1,
      (1 - 1e-5, 0.5, 100), where puruspe's inexact P happens to land
-     within tolerance. Every other
-     point of groups 5 and 6 passes, so those failures are `betai`'s.
+     within tolerance. Every other point of groups 5 and 6 passes, so
+     those failures are `betai`'s (except group 6's last 2, which depend
+     on the loop's path).
    - Remedies switched on one at a time fix the groups: solving
      1 - I = 1 - p for p > 1/2 (group 3; 5 also need the next one); a
      start at or above the lower bound (p a B(a, b))^(1/a), from
