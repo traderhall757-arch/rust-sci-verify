@@ -871,7 +871,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 33: statrs Anderson-Darling test** (statrs
   `stats_tests::anderson_darling::anderson_darling`;
-  [PR #47](https://github.com/traderhall757-arch/rust-sci-verify/pull/47), open):
+  [PR #47](https://github.com/traderhall757-arch/rust-sci-verify/pull/47), merged):
   - New dataset `anderson` (128 points: the KS one-sample patterns against
     the uniform distribution, n = 1 to 100, plus 4 samples far from uniform;
     exponential samples 1/2 + w z, n = 5, 20, 100, with the largest value
@@ -898,15 +898,37 @@ _Updated at the end of every session. Start here._
     distribution; it rises again above z = 153.47 (a worse fit gets a
     larger p-value) and exceeds 1 above z = 306.71.
 
+- **Milestone 4, part 34: puruspe invgammp** (follow-up; `puruspe::invgammp`
+  on `gamma_ppf`; PR link below, open):
+  - No new data: the existing `gamma_ppf` dataset (432 points, tolerance
+    2e-13). `invgammp` takes (p, a).
+  - It fails 397 of 432 points: **finding 056** (high), approved by Claude
+    after the checklist. Its own code (107 points): +inf is never returned
+    at p = 1 (it gives a + 100 sqrt(a) or 100); an absolute stopping test
+    stops after one step for a < 1 (relative errors up to 453); for a > 1
+    the start (usually clamped to 1e-3) is far from a tiny quantile and 12
+    steps cannot reach it
+    (`invgammp(1e-50, 2)` = 1.9e-9, true 1.4e-25); the upper tail solves
+    P = p instead of Q = 1 - p (up to 8.7% off). Where `gammp`'s errors
+    show first (290 points; 5 would fail even with an exact P and
+    log-gamma): panics
+    "Bad args in gammp" after its NaN (finding 002) for a >= 100, and its
+    accuracy (findings 033, 002), up to 2.3e-9, and its small-x shortcut
+    (finding 034: 4 points at a = 1 come out 2.59 times too large).
+  - Random scan (seed 20261104, 3,000 points): 2,717 failures, all in these
+    groups (666 panics). A copy of the iteration with exact P and Q, a
+    remedy per cause and a start at or above (p Gamma(a + 1))^(1/a)
+    passes all 3,000; on the grid only the 6 points at p = 5e-324 with
+    a >= 50 are left (they need a step on log P).
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 33, statrs
-   `anderson_darling`, finding 055): [PR #47](https://github.com/traderhall757-arch/rust-sci-verify/pull/47).
+1. **Owner: review and merge the open PR** (Milestone 4 part 34, puruspe
+   `invgammp`, finding 056): PR link below.
 2. **Milestone 4, continued** (next session; one family per PR):
    - All statrs hypothesis tests are now checked. **Suggested next:**
-     puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
-     and finding 002's NaN may break it) on `gamma_ppf`; puruspe `invbetai`
-     on `betaincinv`; puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
+     puruspe `invbetai` on `betaincinv` (calls `betai`, finding 001);
+     puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
    - Not yet listed anywhere: statrs `Triangular` and `Uniform` (closed form,
      continuous) and the discrete distributions (`Poisson`, `Binomial`,
      `Geometric`, `Hypergeometric`, ...); the owner decides whether they belong
@@ -925,7 +947,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 055 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 056 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
