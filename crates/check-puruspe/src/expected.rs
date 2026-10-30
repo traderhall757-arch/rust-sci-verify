@@ -3357,8 +3357,8 @@ pub(crate) const INVBETAI: &[&[f64]] = &[
     &[10000.0, 1000.0, 0.999999999999999],
 ];
 
-/// `puruspe::invbetai` on `betaincinv`, errors of the `betai` and `ln_gamma`
-/// it calls (finding 057, groups 5 and 6): 791 points.
+/// `puruspe::invbetai` on `betaincinv`, errors of the `betai` it calls
+/// (finding 057, groups 5 and 6): 791 points.
 pub(crate) const INVBETAI_BETAI: &[&[f64]] = &[
     &[0.1, 0.1, 1e-20],
     &[0.1, 0.1, 1e-10],
