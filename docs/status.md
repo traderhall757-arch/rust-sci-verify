@@ -781,7 +781,8 @@ _Updated at the end of every session. Start here._
     points).
 
 - **Milestone 4, part 30: statrs Fisher's exact test** (statrs
-  `stats_tests::fisher::fishers_exact_with_odds_ratio`; PR pending):
+  `stats_tests::fisher::fishers_exact_with_odds_ratio`;
+  [PR #44](https://github.com/traderhall757-arch/rust-sci-verify/pull/44), open):
   - New dataset `fisher_exact` (411 points: published tables (SciPy's
     documentation, Fisher's tea tasting, statrs's fisher test cases), the first 12
     tables with another table at most 1e-4 more probable, and tables by their
