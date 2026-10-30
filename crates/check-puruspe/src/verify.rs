@@ -112,6 +112,21 @@ fn puruspe_matches_reference() {
         }
         .run(|p| Outcome::scalar(puruspe::gammq(p.scalar("a"), p.scalar("x")))),
         Check {
+            function: "puruspe::invgammp",
+            dataset: "gamma_ppf",
+            expected: &[
+                Expected {
+                    finding: "056-puruspe-invgammp",
+                    points: expected::INVGAMMP,
+                },
+                Expected {
+                    finding: "056-puruspe-invgammp",
+                    points: expected::INVGAMMP_GAMMP,
+                },
+            ],
+        }
+        .run(|p| Outcome::scalar(puruspe::invgammp(p.scalar("p"), p.scalar("a")))),
+        Check {
             function: "puruspe::gamma",
             dataset: "gamma",
             expected: &[],
