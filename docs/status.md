@@ -900,7 +900,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 34: puruspe invgammp** (follow-up; `puruspe::invgammp`
   on `gamma_ppf`;
-  [PR #48](https://github.com/traderhall757-arch/rust-sci-verify/pull/48), open):
+  [PR #48](https://github.com/traderhall757-arch/rust-sci-verify/pull/48), merged):
   - No new data: the existing `gamma_ppf` dataset (432 points, tolerance
     2e-13). `invgammp` takes (p, a).
   - It fails 397 of 432 points: **finding 056** (high), approved by Claude
@@ -922,13 +922,32 @@ _Updated at the end of every session. Start here._
     passes all 3,000; on the grid only the 6 points at p = 5e-324 with
     a >= 50 are left (they need a step on log P).
 
+- **Milestone 4, part 35: puruspe invbetai** (follow-up; `puruspe::invbetai`
+  on `betaincinv`;
+  [PR #49](https://github.com/traderhall757-arch/rust-sci-verify/pull/49), open):
+  - No new data: the existing `betaincinv` dataset (1620 points, tolerance
+    2e-13). `invbetai` takes (p, a, b).
+  - It fails 1035 of 1620 points: **finding 057** (high), approved by
+    Claude after the checklist. Its own code (244 points): a panic "Bad x
+    in routine betai" where the density underflows to 0 at the start
+    (42; `invbetai(1e-20, 1000, 1)`); a start far from tail quantiles
+    with only 10 steps (66; `invbetai(1e-100, 10, 1)` = 4.9e-22, true 1e-10);
+    the upper tail solved through P instead of 1 - P (105, up to 17x);
+    p = 5e-324, where P cannot resolve x (31). Where `betai`'s errors show
+    first (791): finding 001's bugs 1 and 3 (93, 12 panics, e.g.
+    `invbetai(0.5, 1e4, 1e4)` panics) and its accuracy (698, up to
+    2.3e-10; mostly bug 4, the `ln_gamma` prefactor).
+  - Random scan (seed 20261105, 3,000 points): 2,158 failures, all in these
+    groups (111 panics). A copy with exact P and a remedy per cause passes
+    every grid point and all but 2 random points (quantiles below the
+    smallest normal double).
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 34, puruspe
-   `invgammp`, finding 056): [PR #48](https://github.com/traderhall757-arch/rust-sci-verify/pull/48).
+1. **Owner: review and merge the open PR** (Milestone 4 part 35, puruspe
+   `invbetai`, finding 057): [PR #49](https://github.com/traderhall757-arch/rust-sci-verify/pull/49).
 2. **Milestone 4, continued** (next session; one family per PR):
    - All statrs hypothesis tests are now checked. **Suggested next:**
-     puruspe `invbetai` on `betaincinv` (calls `betai`, finding 001);
      puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
    - Not yet listed anywhere: statrs `Triangular` and `Uniform` (closed form,
      continuous) and the discrete distributions (`Poisson`, `Binomial`,
@@ -948,7 +967,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 056 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 057 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
