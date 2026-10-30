@@ -2979,3 +2979,110 @@ def test_mannwhitneyu_two_sided_pvalue_is_capped_at_one():
             u, p = functions._mp_mannwhitneyu(mp(*x), mp(*y), mpmath.mpf(method), mpmath.mpf(0))
             assert u == 8
             assert p == 1
+
+
+@pytest.mark.parametrize(
+    "table", [(2, 1, 1, 2), (3, 1, 1, 3), (0, 3, 4, 1), (2, 3, 1, 4), (5, 0, 1, 2)]
+)
+def test_fisher_exact_counts_match_enumeration_of_labellings(table):
+    # The hypergeometric counts against a different route: label every one of the
+    # n1 + n2 items by row, choose every set of n of them for the first column, and
+    # count the sets with x row-1 items. Every p-value is then a ratio of such counts.
+    a, b, c, d = table
+    n1, n = a + b, a + c
+    rows = [0] * n1 + [1] * (c + d)
+    counts = {}
+    for chosen in itertools.combinations(range(len(rows)), n):
+        x = sum(1 for i in chosen if rows[i] == 0)
+        counts[x] = counts.get(x, 0) + 1
+    w, lo, total = functions._fisher_weights(*table)
+    assert {lo + i: v for i, v in enumerate(w)} == counts
+    assert total == sum(counts.values())
+    assert functions._fisher_pvalue_counts(*table, -1.0) == (
+        sum(v for x, v in counts.items() if x <= a),
+        total,
+    )
+    assert functions._fisher_pvalue_counts(*table, 1.0) == (
+        sum(v for x, v in counts.items() if x >= a),
+        total,
+    )
+    assert functions._fisher_pvalue_counts(*table, 0.0) == (
+        sum(v for v in counts.values() if v <= counts[a]),
+        total,
+    )
+
+
+def test_fisher_exact_greater_matches_less_on_the_second_column():
+    # P(X >= a) is P(Y <= b) for Y the first-row count of the second column (the route
+    # SciPy and statrs take), for every grid table.
+    for a, b, c, d, alt in functions._fisher_grid():
+        if alt != 1:
+            continue
+        a, b, c, d = int(a), int(b), int(c), int(d)
+        greater = functions._fisher_pvalue_counts(a, b, c, d, 1.0)
+        assert greater == functions._fisher_pvalue_counts(b, a, d, c, -1.0)
+
+
+def test_fisher_exact_matches_the_published_examples():
+    with mpmath.workdps(50):
+        # SciPy's documentation: [[8, 2], [1, 5]], two-sided: odds ratio 20, p = 5/143.
+        odds, p = functions._mp_fisher_exact(*mp(8, 2, 1, 5, 0))
+        assert odds == 20 and p == mpmath.mpf(5) / 143
+        # SciPy documents 0.034965034965034975, one ulp above 5/143 correctly rounded.
+        assert float(p) == 0.03496503496503497
+        assert math.nextafter(float(p), 1) == 0.034965034965034975
+        # [[6, 2], [1, 4]]: x = 2, 6, 7 of the support 2..7, 0.0163 + 0.0816 + 0.00466.
+        _, p = functions._mp_fisher_exact(*mp(6, 2, 1, 4, 0))
+        assert p == mpmath.mpf(7 + 35 + 2) / 429
+        assert abs(p - mpmath.mpf("0.10256")) < 1e-5
+        # Fisher's tea tasting, 3 of 4 cups right: one-sided 17/70, two-sided 34/70.
+        _, p = functions._mp_fisher_exact(*mp(3, 1, 1, 3, 1))
+        assert p == mpmath.mpf(17) / 70
+        _, p = functions._mp_fisher_exact(*mp(3, 1, 1, 3, 0))
+        assert p == mpmath.mpf(34) / 70
+
+
+def test_fisher_exact_pvalue_matches_mpmath_binomials():
+    # The exact counts against hypergeometric probabilities from mpmath.binomial at
+    # 60 digits, for the largest margins (701 terms).
+    a, b, c, d = 380, 620, 320, 580
+    with mpmath.workdps(60):
+        n1, n2, n = a + b, c + d, a + c
+        pmf = {
+            x: mpmath.binomial(n1, x) * mpmath.binomial(n2, n - x) / mpmath.binomial(n1 + n2, n)
+            for x in range(n + 1)
+        }
+        assert close(sum(pmf.values()), mpmath.mpf(1), digits=50)
+        expected = {
+            -1.0: sum(v for x, v in pmf.items() if x <= a),
+            1.0: sum(v for x, v in pmf.items() if x >= a),
+            0.0: sum(v for v in pmf.values() if v <= pmf[a] * (1 + mpmath.mpf(10) ** -40)),
+        }
+        for alt, e in expected.items():
+            _, p = functions._mp_fisher_exact(*mp(a, b, c, d, alt))
+            assert close(p, e, digits=45)
+
+
+def test_fisher_exact_near_ties_leave_out_the_more_probable_table():
+    # Each near-tie table has a table at most 1e-4 more probable, which the two-sided
+    # p-value leaves out (it would be included under statrs's 1e-4 window).
+    ties = functions._fisher_near_ties()
+    grid = functions._fisher_grid()
+    assert len(ties) == 12 and ties[0] == (6, 9, 16, 41)
+    for table in ties:
+        w, lo, _ = functions._fisher_weights(*table)
+        wa = w[table[0] - lo]
+        closer = [v for v in w if wa < v and (v - wa) * 10**4 <= v]
+        assert closer
+        count, _ = functions._fisher_pvalue_counts(*table, 0.0)
+        assert count == sum(v for v in w if v <= wa)
+        assert (*map(float, table), 0.0) in grid
+
+
+def test_fisher_exact_rounding_bound_matches_the_tolerance_reason():
+    worst, point = max(
+        (functions.fisher_exact_rounding_bound(*p), p) for p in functions._fisher_grid()
+    )
+    assert 7.7e-14 < worst <= functions.FISHER_EXACT.tolerance
+    a, b, c, d, _ = point
+    assert (a + b, c + d, a + c) == (1000, 900, 700)

@@ -10,6 +10,7 @@ use statrs::distribution::{
 use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
 use statrs::stats_tests::f_oneway::f_oneway;
+use statrs::stats_tests::fisher::fishers_exact_with_odds_ratio;
 use statrs::stats_tests::mannwhitneyu::{MannWhitneyUMethod, mannwhitneyu};
 use statrs::stats_tests::skewtest::skewtest;
 use statrs::stats_tests::ttest_onesample::ttest_onesample;
@@ -938,6 +939,28 @@ fn statrs_matches_reference() {
                 &p.inputs["x"],
                 &p.inputs["y"],
                 mwu_method(p.scalar("method")),
+                alternative(p.scalar("alternative")),
+            ))
+        }),
+        Check {
+            function: "statrs::stats_tests::fisher::fishers_exact_with_odds_ratio",
+            dataset: "fisher_exact",
+            expected: &[
+                Expected {
+                    finding: "051-statrs-fishers-exact",
+                    points: expected::FISHER_EXACT,
+                },
+                Expected {
+                    finding: "052-statrs-hypergeometric",
+                    points: expected::FISHER_EXACT_HYPERGEOMETRIC,
+                },
+            ],
+        }
+        .run(|p| {
+            // The table entries are whole numbers below 2^53 (see the dataset header).
+            let table = ["a", "b", "c", "d"].map(|k| p.scalar(k) as u64);
+            statistic_and_pvalue(fishers_exact_with_odds_ratio(
+                &table,
                 alternative(p.scalar("alternative")),
             ))
         }),
