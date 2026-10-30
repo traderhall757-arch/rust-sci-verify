@@ -811,7 +811,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 31: statrs one-sample Kolmogorov-Smirnov test** (statrs
   `stats_tests::ks_test::ks_onesample` against `Uniform(0, 1)`;
-  [PR #45](https://github.com/traderhall757-arch/rust-sci-verify/pull/45), open):
+  [PR #45](https://github.com/traderhall757-arch/rust-sci-verify/pull/45), merged):
   - New dataset `ks_1samp` (544 points: scrambled samples z_i =
     ((7919 (i + 1)) mod 2048 + 1/2) / 2048 pushed towards 0 or 1 by c in
     {31/32 .. 1/2}, and evenly spread samples (2 i - 1) / (2 n), for n from
@@ -841,18 +841,41 @@ _Updated at the end of every session. Start here._
   - Guardrail change: `scripts/select_datasets.py` allows the standard
     library's `fractions` import in `functions.py` (exact rationals, no state).
 
+- **Milestone 4, part 32: statrs two-sample Kolmogorov-Smirnov test** (statrs
+  `stats_tests::ks_test::ks_twosample`; PR open, see "Next"):
+  - New dataset `ks_2samp` (363 points: the Mann-Whitney samples with
+    half-integer shifts and an interleaved pair, sizes (1, 1) to (100, 100)
+    with all four methods and (101, 100) without the exact one; tied samples
+    and y = x repeated (D = 0) with methods 0, 1 and 3; outputs statistic
+    and p-value; tolerance 5e-12 from the rounding bound, largest 4.6e-12,
+    tested). Reference: the statistic exactly in rationals; the exact
+    p-value by counting lattice paths in exact integers (tested against
+    enumeration and the Gnedenko and Korolyuk sum); Hodges's eq. 5.3 and
+    the limit distribution as published formulas. SciPy agrees everywhere
+    except a statistic of 1.1e-16 instead of 0 at 3 tied points.
+  - `ks_twosample` fails 30 points: **finding 054** (high), approved by
+    Claude after the checklist. Four causes: the empirical cdfs are summed
+    1/n at a time, so a statistic that should be 0 is 1e-16 to 3e-16;
+    the two-sided asymptotic method **never returns** when the statistic is
+    0 or that rounding noise (samples with equal empirical cdfs, which need
+    ties); the exact p-value is `1 - cdf` (-6.0e-15 instead of 2.2e-59);
+    the asymptotic series stops at 1e-10 (finding 053's cause 4).
+  - Random scan (seed 20261102, 3,000 pairs): all 330 failures from these
+    causes (102 never return); a copy with remedies for all four passes
+    everything.
+  - The check runs first in the statrs test, in child processes
+    (`run_isolated`), so the 4 endless calls are killed instead of left
+    spinning; this adds about 20 s (4 x the 5 s limit) to the test.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 31, statrs
-   `ks_onesample`, finding 053): [PR #45](https://github.com/traderhall757-arch/rust-sci-verify/pull/45).
+1. **Owner: review and merge the open PR** (Milestone 4 part 32, statrs
+   `ks_twosample`, finding 054).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Remaining statrs hypothesis tests** (suggested next): `ks_twosample`
-     (exact and asymptotic methods; the one-sample reference's Steck
-     determinant and limit series can be reused), `anderson_darling` (its p-value
-     is an empirical approximation by design: check the statistic, and the
-     p-value only against the same published formula). Each needs its exact
-     distribution in mpmath. Expect the `1 - cdf` pattern of findings
-     026 to 029, 051 and 053.
+   - **Remaining statrs hypothesis test** (suggested next):
+     `anderson_darling` (its p-value is an empirical approximation by
+     design: check the statistic, and the p-value only against the same
+     published formula).
    - puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
      and finding 002's NaN may break it) on `gamma_ppf`; puruspe `invbetai`
      on `betaincinv`; puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
@@ -874,7 +897,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 053 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 054 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -919,7 +942,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s; `fisher_exact` about 2 s; `ks_1samp` about 8 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s; `fisher_exact` about 2 s; `ks_1samp` about 8 s; `ks_2samp` under 1 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).

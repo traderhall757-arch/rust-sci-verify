@@ -3227,3 +3227,99 @@ def test_ks_rounding_bound_matches_the_tolerance_reason():
     worst, point = max((functions.ks_1samp_rounding_bound(*p), p) for p in functions._ks_grid())
     assert 3.3e-12 < worst <= functions.KS_1SAMP.tolerance
     assert point[0] == functions._ks_sample(150, 1 / 2, False)
+
+
+def _ks2_order_d(n1: int, n2: int, x_positions: tuple) -> Fraction:
+    """D of one order of the pooled sample (positions of the x values among
+    0..n1+n2-1), by walking the order: F1 and F2 change by one step at a time."""
+    i = j = 0
+    d = Fraction(0)
+    for k in range(n1 + n2):
+        if k in x_positions:
+            i += 1
+        else:
+            j += 1
+        d = max(d, abs(Fraction(i, n1) - Fraction(j, n2)))
+    return d
+
+
+@pytest.mark.parametrize(("n1", "n2"), [(1, 1), (1, 4), (2, 3), (3, 3), (4, 5), (6, 2)])
+def test_ks2_exact_matches_enumeration(n1, n2):
+    # Every one of the C(n1 + n2, n1) orders, equally likely without ties.
+    ds = [_ks2_order_d(n1, n2, set(c)) for c in itertools.combinations(range(n1 + n2), n1)]
+    for d in sorted(set(ds)) + [Fraction(0), Fraction(1, 2 * n1 * n2)]:
+        true = Fraction(sum(v >= d for v in ds), len(ds))
+        assert functions._ks2_exact_sf(n1, n2, d) == true
+
+
+@pytest.mark.parametrize("n", [1, 8, 50, 100])
+def test_ks2_exact_matches_gnedenko_korolyuk(n):
+    # n1 = n2 = n: P(D >= k / n) = 2 sum_{j>=1} (-1)^(j-1) C(2n, n - j k) / C(2n, n).
+    for k in range(1, n + 1):
+        total = sum((-1) ** (j - 1) * math.comb(2 * n, n - j * k) for j in range(1, n // k + 1))
+        true = Fraction(2 * total, math.comb(2 * n, n))
+        assert functions._ks2_exact_sf(n, n, Fraction(k, n)) == true
+
+
+def test_ks2_statistic_matches_walking_the_pooled_sample():
+    # (D+, D-) by walking the sorted pooled sample, all copies of a value at once.
+    for x, y, _ in functions._ks2_grid():
+        n1, n2 = len(x), len(y)
+        d_plus = d_minus = Fraction(0)
+        i = j = 0
+        xs, ys = sorted(x), sorted(y)
+        for t in sorted(set(x) | set(y)):
+            while i < n1 and xs[i] == t:
+                i += 1
+            while j < n2 and ys[j] == t:
+                j += 1
+            diff = Fraction(i, n1) - Fraction(j, n2)
+            d_plus, d_minus = max(d_plus, diff), max(d_minus, -diff)
+        assert functions._ks2_d(x, y) == (d_plus, d_minus)
+
+
+def test_ks2_repeated_samples_have_d_zero():
+    tied = [(x, y) for x, y, m in functions._ks2_grid() if m == 3 and len(y) % len(x) == 0]
+    repeated = [(x, y) for x, y in tied if y == x * (len(y) // len(x))]
+    assert len(repeated) == 4
+    for x, y in repeated:
+        assert functions._ks2_d(x, y) == (0, 0)
+        with mpmath.workdps(30):
+            assert functions._mp_ks2_pvalue(len(x), len(y), Fraction(0), 3.0) == 1
+
+
+def _ks2_one_sided_sf(n1: int, n2: int, d: Fraction) -> Fraction:
+    """P(D+ >= d) exactly without ties: paths with i / n1 - j / n2 < d throughout."""
+    bound = d * n1 * n2
+    row = [1] * (n2 + 1)
+    for i in range(1, n1 + 1):
+        row[0] = row[0] if i * n2 < bound else 0
+        for j in range(1, n2 + 1):
+            row[j] = row[j] + row[j - 1] if i * n2 - j * n1 < bound else 0
+    return 1 - Fraction(row[n2], math.comb(n1 + n2, n1))
+
+
+def test_ks2_hodges_approximates_the_one_sided_tail():
+    # Hodges's eq. 5.3 is an approximation, so only a sanity check: within 25% of the
+    # exact P(D+ >= d), and closer with m the larger size (as written) than with the
+    # sizes swapped.
+    with mpmath.workdps(30):
+        assert functions._mp_hodges(Fraction(0), 5, 7) == 1
+        for n1, n2, d in ((100, 40, Fraction(1, 4)), (40, 100, Fraction(1, 4)),
+                          (200, 60, Fraction(1, 5)), (100, 100, Fraction(1, 5))):  # fmt: skip
+            true = functions._mp_frac(_ks2_one_sided_sf(n1, n2, d))
+            ours = functions._mp_hodges(d, n1, n2)
+            assert abs(ours / true - 1) < 0.25
+            if n1 != n2:
+                m, n = min(n1, n2), max(n1, n2)  # swapped roles
+                z = functions._mp_frac(d) * mpmath.sqrt(mpmath.mpf(m * n) / (m + n))
+                swapped = mpmath.exp(
+                    -2 * z * z - 2 * z * (m + 2 * n) / (3 * mpmath.sqrt(m * n * (m + n)))
+                )
+                assert abs(ours - true) < abs(swapped - true)
+
+
+def test_ks2_rounding_bound_matches_the_tolerance_reason():
+    worst, point = max((functions.ks_2samp_rounding_bound(*p), p) for p in functions._ks2_grid())
+    assert 4.5e-12 < worst <= functions.KS_2SAMP.tolerance
+    assert (len(point[0]), len(point[1]), point[2]) == (101, 100, 0.0)
