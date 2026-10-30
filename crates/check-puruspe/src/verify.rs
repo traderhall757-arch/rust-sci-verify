@@ -127,6 +127,27 @@ fn puruspe_matches_reference() {
         }
         .run(|p| Outcome::scalar(puruspe::invgammp(p.scalar("p"), p.scalar("a")))),
         Check {
+            function: "puruspe::invbetai",
+            dataset: "betaincinv",
+            expected: &[
+                Expected {
+                    finding: "057-puruspe-invbetai",
+                    points: expected::INVBETAI,
+                },
+                Expected {
+                    finding: "057-puruspe-invbetai",
+                    points: expected::INVBETAI_BETAI,
+                },
+            ],
+        }
+        .run(|p| {
+            Outcome::scalar(puruspe::invbetai(
+                p.scalar("p"),
+                p.scalar("a"),
+                p.scalar("b"),
+            ))
+        }),
+        Check {
             function: "puruspe::gamma",
             dataset: "gamma",
             expected: &[],
