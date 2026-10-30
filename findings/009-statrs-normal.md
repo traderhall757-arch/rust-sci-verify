@@ -22,6 +22,11 @@
   `reference/data/skewtest.jsonl` (tolerance 2e-12) fail only through it
   (p-values 2.4e-11 to 1.03e-10 off; list `SKEWTEST_ERFC`; added
   2026-10-15). Its own errors are finding 029.
+  `statrs::stats_tests::mannwhitneyu::mannwhitneyu` takes its asymptotic
+  p-values from `Normal::cdf` too: 268 of 690 points of
+  `reference/data/mannwhitneyu.jsonl` (tolerance 1e-13) fail only through it
+  (p-values 1.1e-13 to 1.03e-10 off; list `MANNWHITNEYU_ERFC`; added
+  2026-10-29). Its own errors are finding 050.
 
 ## Reproduction
 

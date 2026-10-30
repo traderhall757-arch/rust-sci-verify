@@ -727,7 +727,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 28: statrs Levy distribution** (statrs
   `Levy::cdf`, `sf`, `inverse_cdf`;
-  [PR #42](https://github.com/traderhall757-arch/rust-sci-verify/pull/42), open):
+  [PR #42](https://github.com/traderhall757-arch/rust-sci-verify/pull/42), merged):
   - New datasets `levy_cdf` and `levy_sf` (1776 points each: the Gumbel
     (mu, c) pairs x x = mu + c t for t from -1 to 160/4 in steps of 1/65536
     to 1/4 next to the support, decades to 1e308, and 3 2^1030 to 2^1523,
@@ -752,13 +752,41 @@ _Updated at the end of every session. Start here._
     every other random point.
   - `pdf` and `ln_pdf` not checked.
 
+- **Milestone 4, part 29: statrs Mann-Whitney U test** (statrs
+  `stats_tests::mannwhitneyu`;
+  [PR #43](https://github.com/traderhall757-arch/rust-sci-verify/pull/43), open):
+  - New dataset `mannwhitneyu` (690 points: two samples from the distinct
+    integers (7919 i) mod 1000, x shifted by d; sizes 3 + 6 to 20 + 8 with
+    all four methods (automatic, exact, asymptotic with and without
+    continuity correction), 9 + 9 to 25 + 10 asymptotic only, and tied
+    samples; three alternatives; outputs U1 and p-value; tolerance 1e-13 from
+    the rounding bound, largest 8.6e-14, tested). Reference: exact average
+    ranks in integer arithmetic, the exact null distribution from the Mann
+    and Whitney recurrence, the tie-corrected normal tail from erfc; tested
+    against enumeration of every split, pair counting, the exact variance
+    with ties, `mpmath.ncdf` and SciPy's published example. SciPy passes
+    every point (worst 2.1e-15).
+  - `mannwhitneyu` fails 448 points. **Finding 050** (high), approved by
+    Claude after the checklist, covers 180: the exact p-value is
+    1 - P(U >= u) whenever x is not longer than y (SciPy's own example gives
+    0.944 instead of 0.0556; every such exact point fails), and the
+    asymptotic p-value is `1 - cdf` (0 below about 1e-16). The other 268
+    fail only through `Normal::cdf`'s `erfc` (finding 009, now naming
+    `mannwhitneyu`).
+  - Random scan (seed 20261029, 3,000 points): all failures from these
+    causes; a copy with both remedies and an accurate erfc passes every
+    grid and random point. Also measured: the exact method enumerates every
+    split (2.5 s for samples of 8 and 40), and `Automatic` picks it whenever
+    one sample has at most 8 values (in the finding's notes, no listed
+    points).
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 28, statrs
-   `Levy`, findings 048 and 049).
+1. **Owner: review and merge the open PR** (Milestone 4 part 29, statrs
+   `mannwhitneyu`, finding 050).
 2. **Milestone 4, continued** (next session; one family per PR):
-   - **Remaining statrs hypothesis tests** (suggested next): `mannwhitneyu` (exact and
-     asymptotic), `ks_onesample` / two-sample (exact distributions),
+   - **Remaining statrs hypothesis tests** (suggested next): `ks_onesample` /
+     two-sample (exact distributions),
      `fishers_exact` (hypergeometric sums), `anderson_darling` (its p-value
      is an empirical approximation by design: check the statistic, and the
      p-value only against the same published formula). Each needs its exact
@@ -784,7 +812,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 049 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 050 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -829,7 +857,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).

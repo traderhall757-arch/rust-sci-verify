@@ -10,6 +10,7 @@ use statrs::distribution::{
 use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
 use statrs::stats_tests::f_oneway::f_oneway;
+use statrs::stats_tests::mannwhitneyu::{MannWhitneyUMethod, mannwhitneyu};
 use statrs::stats_tests::skewtest::skewtest;
 use statrs::stats_tests::ttest_onesample::ttest_onesample;
 use statrs::stats_tests::{Alternative, NaNPolicy};
@@ -175,6 +176,17 @@ fn alternative(code: f64) -> Alternative {
         0.0 => Alternative::TwoSided,
         1.0 => Alternative::Greater,
         _ => panic!("alternative code {code}"),
+    }
+}
+
+/// The Mann-Whitney method of a point's method code (see the dataset header).
+fn mwu_method(code: f64) -> MannWhitneyUMethod {
+    match code {
+        0.0 => MannWhitneyUMethod::Automatic,
+        1.0 => MannWhitneyUMethod::Exact,
+        2.0 => MannWhitneyUMethod::AsymptoticInclContinuityCorrection,
+        3.0 => MannWhitneyUMethod::AsymptoticExclContinuityCorrection,
+        _ => panic!("method code {code}"),
     }
 }
 
@@ -905,6 +917,28 @@ fn statrs_matches_reference() {
                 p.inputs["x"].clone(),
                 alternative(p.scalar("alternative")),
                 NaNPolicy::Error,
+            ))
+        }),
+        Check {
+            function: "statrs::stats_tests::mannwhitneyu::mannwhitneyu",
+            dataset: "mannwhitneyu",
+            expected: &[
+                Expected {
+                    finding: "050-statrs-mannwhitneyu",
+                    points: expected::MANNWHITNEYU,
+                },
+                Expected {
+                    finding: "009-statrs-normal",
+                    points: expected::MANNWHITNEYU_ERFC,
+                },
+            ],
+        }
+        .run(|p| {
+            statistic_and_pvalue(mannwhitneyu(
+                &p.inputs["x"],
+                &p.inputs["y"],
+                mwu_method(p.scalar("method")),
+                alternative(p.scalar("alternative")),
             ))
         }),
         // Near the end: it loops forever at 7 points (finding 020); the

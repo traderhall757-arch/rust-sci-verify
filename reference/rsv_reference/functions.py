@@ -3454,6 +3454,213 @@ SKEWTEST = Spec(
     scipy_fn=_sc_skewtest,
 )
 
+# --- hypothesis tests: Mann-Whitney U test -------------------------------------
+
+# Two samples from the distinct integers v_i = (7919 i) mod 1000: x is v_0..v_{n1-1}
+# shifted by d, y is the next n2. Half-integer shifts keep every value distinct (the
+# exact method needs that); the tied samples round v_i down to a multiple of 200 and
+# shift by multiples of 200, so values repeat within and across the samples.
+# method: 0 automatic, 1 exact, 2 asymptotic with and 3 without the continuity
+# correction. The exact sizes keep statrs's enumeration of all C(n1 + n2, min(n1, n2))
+# splits below 3.2 million.
+_MWU_EXACT_SIZES = ((3, 6), (6, 3), (4, 5), (5, 4), (8, 8), (8, 20), (20, 8))
+_MWU_LARGE_SIZES = ((9, 9), (10, 25), (25, 10))
+_MWU_TIED_SIZES = ((4, 5), (8, 8), (10, 25))
+_MWU_SHIFTS = (-1000.5, -200.5, 0.5, 150.5, 1000.5)
+_MWU_TIED_SHIFTS = (-1000.0, -200.0, 0.0, 200.0, 1000.0)
+_MWU_METHODS = {0.0: "auto", 1.0: "exact", 2.0: "asymptotic", 3.0: "asymptotic"}
+
+
+def _mwu_samples(n1: int, n2: int, shift: float, tied: bool):
+    v = [(7919 * i) % 1000 for i in range(n1 + n2)]
+    if tied:
+        v = [200 * (w // 200) for w in v]
+    return tuple(float(w) + shift for w in v[:n1]), tuple(float(w) for w in v[n1:])
+
+
+def _mwu_grid() -> list[tuple[tuple[float, ...], tuple[float, ...], float, float]]:
+    grid = []
+    for sizes, shifts, tied, methods in (
+        (_MWU_EXACT_SIZES, _MWU_SHIFTS, False, (0.0, 1.0, 2.0, 3.0)),
+        (_MWU_LARGE_SIZES, _MWU_SHIFTS, False, (0.0, 2.0, 3.0)),
+        (_MWU_TIED_SIZES, _MWU_TIED_SHIFTS, True, (0.0, 2.0, 3.0)),
+    ):
+        for n1, n2 in sizes:
+            for d in shifts:
+                x, y = _mwu_samples(n1, n2, d, tied)
+                grid.extend((x, y, m, alt) for m in methods for alt in _TTEST_ALTERNATIVES)
+    return grid
+
+
+def _mwu_twice_ranks(xy: list) -> list[int]:
+    """Twice the average ranks (1-based): integers, so everything stays exact."""
+    order = sorted(xy)
+    first = {}
+    count = {}
+    for i, v in enumerate(order):
+        first.setdefault(v, i + 1)
+        count[v] = count.get(v, 0) + 1
+    return [2 * first[v] + count[v] - 1 for v in xy]
+
+
+def _mwu_twice_u1(x: list, y: list) -> int:
+    """2 U1 = 2 R1 - n1 (n1 + 1)."""
+    n1 = len(x)
+    return sum(_mwu_twice_ranks(list(x) + list(y))[:n1]) - n1 * (n1 + 1)
+
+
+def _mwu_null_counts(n1: int, n2: int) -> list[int]:
+    """c[u] = number of the C(n1 + n2, n1) splits with U = u (no ties): the
+    coefficients of the Gaussian binomial [n1 + n2, n1]_q, from the recurrence
+    c(m, n; u) = c(m - 1, n; u - n) + c(m, n - 1; u) (Mann and Whitney 1947, eq. 2)."""
+    # table[m] holds the counts for (m, n) as n grows; start with n = 0: U = 0 only.
+    table = [[1] for _ in range(n1 + 1)]
+    for n in range(1, n2 + 1):
+        new = [[1]]
+        for m in range(1, n1 + 1):
+            up = table[m]  # (m, n - 1)
+            left = new[m - 1]  # (m - 1, n), shifted by n
+            c = [0] * (m * n + 1)
+            for u, k in enumerate(up):
+                c[u] += k
+            for u, k in enumerate(left):
+                c[u + n] += k
+            new.append(c)
+        table = new
+    return table[n1]
+
+
+def _mwu_exact_sf(twice_u: int, n1: int, n2: int) -> tuple[int, int]:
+    """P(U >= u) under the null hypothesis as (count, total), exactly (no ties, so U
+    is a whole number)."""
+    if twice_u % 2:
+        raise ValueError(f"exact Mann-Whitney p-value at U = {twice_u}/2: U must be whole (ties?)")
+    c = _mwu_null_counts(n1, n2)
+    return sum(c[twice_u // 2 :]), sum(c)
+
+
+def _mwu_tie_term(x: list, y: list) -> int:
+    counts = {}
+    for v in list(x) + list(y):
+        counts[v] = counts.get(v, 0) + 1
+    return sum(t**3 - t for t in counts.values())
+
+
+def _mwu_z(twice_u: int, n1: int, n2: int, tie_term: int, continuity: bool) -> mpmath.mpf:
+    """(U - n1 n2 / 2 - 0.5) / s with s^2 = n1 n2 / 12 ((n + 1) - sum(t^3 - t) / (n (n - 1))),
+    the variance of U with ties (Lehmann 1975, eq. 1.45); without the 0.5 if not continuity.
+    Computed as (2 U - n1 n2 - 1) / (2 s) with 4 s^2 = n1 n2 ((n + 1) n (n - 1) - tie_term)
+    / (3 n (n - 1)), integers until the square root."""
+    n = n1 + n2
+    numerator = twice_u - n1 * n2 - (1 if continuity else 0)
+    four_var = mpmath.mpf(n1 * n2 * ((n + 1) * n * (n - 1) - tie_term)) / (3 * n * (n - 1))
+    return numerator / mpmath.sqrt(four_var)
+
+
+def _mwu_tested_u(twice_u1: int, n1: int, n2: int, alternative: float) -> tuple[int, int]:
+    """2 U for the U the p-value is taken at, and the factor f: U1 (greater), U2
+    (less), max(U1, U2) with f = 2 (two-sided), as in SciPy."""
+    twice_u2 = 2 * n1 * n2 - twice_u1
+    if alternative > 0:
+        return twice_u1, 1
+    if alternative < 0:
+        return twice_u2, 1
+    return max(twice_u1, twice_u2), 2
+
+
+def _mwu_ties(x: list, y: list) -> bool:
+    return len(set(x) | set(y)) < len(x) + len(y)
+
+
+def _mwu_method(x: list, y: list, method: float) -> float:
+    """Method 0 resolved by SciPy's and statrs's rule."""
+    if method != 0:
+        return method
+    return 2.0 if (len(x) > 8 and len(y) > 8) or _mwu_ties(x, y) else 1.0
+
+
+def _mp_mannwhitneyu(x: list, y: list, method: mpmath.mpf, alternative: mpmath.mpf):
+    xs, ys = [float(v) for v in x], [float(v) for v in y]  # the inputs are doubles
+    n1, n2 = len(xs), len(ys)
+    twice_u1 = _mwu_twice_u1(xs, ys)
+    twice_u, f = _mwu_tested_u(twice_u1, n1, n2, float(alternative))
+    method = _mwu_method(xs, ys, float(method))
+    if method == 1:
+        count, total = _mwu_exact_sf(twice_u, n1, n2)
+        p = min(mpmath.mpf(f * count) / total, mpmath.mpf(1))
+    else:
+        z = _mwu_z(twice_u, n1, n2, _mwu_tie_term(xs, ys), continuity=method == 2)
+        p = min(f * mpmath.erfc(z / mpmath.sqrt(2)) / 2, mpmath.mpf(1))
+    return mpmath.mpf(twice_u1) / 2, p
+
+
+def mannwhitneyu_rounding_bound(x: tuple, y: tuple, method: float, alternative: float) -> float:
+    """max(kappa_p, 1) (kappa_U + n) 2^-53 with kappa_U = 0: U is a sum of
+    half-integer ranks, exact in double arithmetic, so U and z move only with the
+    few rounded operations in s, counted generously by n; kappa_p = |z phi(z) / Q|
+    for the asymptotic methods and 1 for the exact one (a ratio of exact counts)."""
+    n1, n2 = len(x), len(y)
+    method = _mwu_method(x, y, method)
+    kappa_p = mpmath.mpf(1)
+    if method != 1:
+        twice_u, _ = _mwu_tested_u(_mwu_twice_u1(x, y), n1, n2, alternative)
+        z = _mwu_z(twice_u, n1, n2, _mwu_tie_term(x, y), continuity=method == 2)
+        kappa_p = max(abs(z * mpmath.npdf(z) / (mpmath.erfc(z / mpmath.sqrt(2)) / 2)), 1)
+    return float(kappa_p * (n1 + n2) * mpmath.mpf(2) ** -53)
+
+
+def _sc_mannwhitneyu(
+    x: list[float], y: list[float], method: float, alternative: float
+) -> tuple[float, float]:
+    r = st.mannwhitneyu(
+        x,
+        y,
+        use_continuity=method != 3,
+        alternative=_TTEST_ALTERNATIVES[alternative],
+        method=_MWU_METHODS[method],
+    )
+    return float(r.statistic), float(r.pvalue)
+
+
+MANNWHITNEYU = Spec(
+    name="mannwhitneyu",
+    description=(
+        "Mann-Whitney U test: U1 = R1 - n1 (n1 + 1) / 2 from the average ranks of x in "
+        "x and y, and its p-value; method 0 automatic (exact if n1 <= 8 or n2 <= 8 and no "
+        "ties, else 2), 1 exact null distribution, 2 normal approximation with the tie "
+        "correction and the continuity correction, 3 the same without the continuity "
+        "correction; alternative -1 less, 0 two-sided (twice the tail at max(U1, U2), "
+        "at most 1), 1 greater"
+    ),
+    inputs=("x", "y", "method", "alternative"),
+    outputs=("statistic", "pvalue"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "For both outputs, by the rule of ttest_1samp. U1 is a sum of half-integer ranks, "
+        "exact in double arithmetic, so its condition number in the data is 0 and only the "
+        "few rounded operations in s move z, counted generously as n = n1 + n2; the exact "
+        "p-value is a ratio of exact counts (kappa_p = 1), the asymptotic one adds "
+        "kappa_p = |z phi(z) / Q| (mannwhitneyu_rounding_bound). The largest bound "
+        "max(kappa_p, 1) n 2^-53 on this grid is 8.6e-14 (n1 = 10, n2 = 25, x above y, "
+        "without continuity correction: z = 4.6); 1e-13 is the smallest round value above "
+        "it (tested). SciPy's worst error is 2.1e-15"
+    ),
+    grid_description=(
+        "x the first n1 and y the next n2 of v_i = (7919 i) mod 1000, x shifted by d: sizes "
+        "(n1, n2) in {(3, 6), (6, 3), (4, 5), (5, 4), (8, 8), (8, 20), (20, 8)} with methods "
+        "0 to 3, and {(9, 9), (10, 25), (25, 10)} with methods 0, 2 and 3, for d in "
+        "{-1000.5, -200.5, 0.5, 150.5, 1000.5} (all values distinct); tied samples with "
+        "v_i rounded down to a multiple of 200, sizes {(4, 5), (8, 8), (10, 25)}, d in "
+        "{-1000, -200, 0, 200, 1000}, methods 0, 2 and 3; each with alternative -1 (less), "
+        "0 (two-sided) and 1 (greater). U1 from 0 to 250 (54 points with a half-integer U1), p-value from "
+        "3.2e-7 to 1"
+    ),
+    grid=_mwu_grid,
+    mpmath_fn=_mp_mannwhitneyu,
+    scipy_name="scipy.stats.mannwhitneyu",
+    scipy_fn=_sc_mannwhitneyu,
+)
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -4127,7 +4334,7 @@ ALL: tuple[Spec, ...] = (
     GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF, LAPLACE_CDF, LAPLACE_SF, LAPLACE_PPF,
     CAUCHY_CDF, CAUCHY_SF, CAUCHY_PPF, LEVY_CDF, LEVY_SF, LEVY_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
-    SKEWTEST,
+    SKEWTEST, MANNWHITNEYU,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip
