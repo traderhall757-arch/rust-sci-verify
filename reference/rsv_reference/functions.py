@@ -2,6 +2,7 @@
 
 import itertools
 import math
+from fractions import Fraction
 
 import mpmath
 import scipy.special as sc
@@ -3838,6 +3839,259 @@ FISHER_EXACT = Spec(
     scipy_fn=_sc_fisher_exact,
 )
 
+# --- hypothesis tests: one-sample Kolmogorov-Smirnov test ----------------------
+
+# Samples in (0, 1) tested against the uniform distribution on (0, 1), whose cdf
+# F(x) = x is exact in statrs and SciPy, so only the statistic and the p-value are
+# judged. z_i = ((7919 (i + 1)) mod 2048 + 1/2) / 2048, i = 0..n-1, are distinct
+# exact doubles (7919 is odd); x_i = c z_i pushes the sample towards 0 (large D+)
+# and x_i = 1 - c (1 - z_i) towards 1 (large D-), both exact for these c; the
+# evenly spread x_i = (2 i - 1) / (2 n) give the smallest D.
+# method: 0 less (statistic D- = max(F(x_(i)) - (i - 1) / n)), 1 greater
+# (D+ = max(i / n - F(x_(i)))), both with the exact one-sided p-value; two-sided with
+# D = max(D+, D-) and the p-value 2 exact (Marsaglia, Tsang and Wang 2003),
+# 3 asymptotic (Kolmogorov's limit at D sqrt(n)), 4 approximate (twice the
+# one-sided p-value, at most 1). statrs refuses the exact method from n = 170; the
+# large sample (n = 1100) has the other four methods.
+_KS_N = (1, 2, 3, 5, 10, 20, 50, 100, 150)
+_KS_LARGE = ((1100, 1.0),)
+_KS_SCALES = (1.0, 31 / 32, 7 / 8, 3 / 4, 5 / 8, 1 / 2)
+_KS_METHODS = {
+    0.0: ("less", "exact"),
+    1.0: ("greater", "exact"),
+    2.0: ("two-sided", "exact"),
+    3.0: ("two-sided", "asymp"),
+    4.0: ("two-sided", "approx"),
+}
+
+
+def _ks_sample(n: int, c: float, high: bool) -> tuple[float, ...]:
+    z = [((7919 * (i + 1)) % 2048 + 0.5) / 2048 for i in range(n)]
+    return tuple(1 - c * (1 - v) if high else c * v for v in z)
+
+
+def _ks_spread_sample(n: int) -> tuple[float, ...]:
+    """x_i = (2 i - 1) / (2 n), i = 1..n: as even as a sample can be, D = 1 / (2 n)
+    (the smallest possible, up to the rounding of x_i), so D sqrt(n) is small."""
+    return tuple((2 * i - 1) / (2 * n) for i in range(1, n + 1))
+
+
+def _ks_grid() -> list[tuple[tuple[float, ...], float]]:
+    grid = []
+    shapes = [(1.0, False)] + [(c, high) for c in _KS_SCALES[1:] for high in (False, True)]
+    for n in _KS_N:
+        for c, high in shapes:
+            x = _ks_sample(n, c, high)
+            grid.extend((x, m) for m in _KS_METHODS)
+        grid.extend((_ks_spread_sample(n), m) for m in _KS_METHODS)
+    for n, c in _KS_LARGE:
+        x = _ks_sample(n, c, False)
+        grid.extend((x, m) for m in (0.0, 1.0, 3.0, 4.0))
+    return grid
+
+
+def _ks_d(x: list) -> tuple[Fraction, Fraction]:
+    """(D+, D-) exactly, from the sorted sample as doubles: D+ = max(i / n - x_(i)),
+    D- = max(x_(i) - (i - 1) / n), i = 1..n (F(x) = x)."""
+    xs = sorted(Fraction(float(v)) for v in x)
+    n = len(xs)
+    d_plus = max(Fraction(i + 1, n) - v for i, v in enumerate(xs))
+    d_minus = max(v - Fraction(i, n) for i, v in enumerate(xs))
+    return d_plus, d_minus
+
+
+def _ks_statistic(x: list, method: float) -> Fraction:
+    d_plus, d_minus = _ks_d(x)
+    if method == 0:
+        return d_minus
+    if method == 1:
+        return d_plus
+    return max(d_plus, d_minus)
+
+
+def _mp_frac(q: Fraction) -> mpmath.mpf:
+    return mpmath.mpf(q.numerator) / q.denominator
+
+
+def _smirnov(n: int, d: Fraction) -> Fraction:
+    """P(D+ >= d) for a sample of n, exactly (Birnbaum and Tingey 1951, eq. 3):
+    d sum_{j=0}^{floor(n (1 - d))} C(n, j) (d + j / n)^(j - 1) (1 - d - j / n)^(n - j);
+    0 for d > 1, 1 for d <= 0. With L the common denominator of d and 1 / n, every
+    a_j = (d + j / n) L and b_j = (1 - d - j / n) L is a whole number, and the sum is
+    (b_0^n + d L sum_{j>=1} C(n, j) a_j^(j - 1) b_j^(n - j)) / L^n (the j = 0 term
+    times d is (1 - d)^n). Exact, so a p-value halfway between two doubles rounds
+    the same way at every precision."""
+    if d <= 0:
+        return Fraction(1)
+    if d > 1:
+        return Fraction(0)
+    big_l = d.denominator * n // math.gcd(d.denominator, n)
+    dl = d.numerator * (big_l // d.denominator)
+    step = big_l // n
+    total = (big_l - dl) ** n
+    for j in range(1, math.floor(n * (1 - d)) + 1):
+        a = dl + j * step
+        b = big_l - dl - j * step
+        total += dl * math.comb(n, j) * a ** (j - 1) * b ** (n - j)
+    return Fraction(total, big_l**n)
+
+
+def _mp_smirnov(n: int, d: Fraction) -> mpmath.mpf:
+    """P(D+ >= d) at the working precision (see _smirnov)."""
+    return _mp_frac(_smirnov(n, d))
+
+
+def _mp_kolmogorov_cdf_mtw(n: int, d: Fraction) -> mpmath.mpf:
+    """P(D < d) for a sample of n by Marsaglia, Tsang and Wang (2003, section 2):
+    n! / n^n (H^n)_{kk} with k = floor(n d) + 1, h = k - n d and the m x m matrix H,
+    m = 2 k - 1. H has no negative entries, so H^n loses nothing; the vector
+    H^n e_k is formed by n products."""
+    k = math.floor(n * d) + 1
+    m = 2 * k - 1
+    h = Fraction(k) - n * d
+    hm = _mp_frac(h)
+    fact = [mpmath.factorial(i) for i in range(m + 1)]
+    H = [
+        [1 / fact[i - j + 1] if i - j + 1 >= 0 else mpmath.mpf(0) for j in range(m)]
+        for i in range(m)
+    ]
+    for i in range(m):
+        H[i][0] -= hm ** (i + 1) / fact[i + 1]
+        H[m - 1][i] -= hm ** (m - i) / fact[m - i]
+    if 2 * h > 1:
+        H[m - 1][0] += _mp_frac(2 * h - 1) ** m / fact[m]
+    v = [mpmath.mpf(0)] * m
+    v[k - 1] = mpmath.mpf(1)
+    for _ in range(n):
+        # H[i][j] = 0 for j > i + 1 (lower Hessenberg).
+        v = [mpmath.fsum(H[i][j] * v[j] for j in range(min(i + 2, m))) for i in range(m)]
+    return v[k - 1] * mpmath.factorial(n) / mpmath.mpf(n) ** n
+
+
+def _mp_kolmogorov_sf(n: int, d: Fraction) -> mpmath.mpf:
+    """P(D >= d) for D = max(D+, D-): 2 P(D+ >= d) for d >= 1/2, where the two
+    one-sided events are disjoint (up to a null set); otherwise 1 - P(D < d) with
+    the digits that 1 - P loses added first (-log10 of the tail is at most about
+    2 n d^2 log10(e) + 2)."""
+    if d >= Fraction(1, 2):
+        return 2 * _mp_smirnov(n, d)
+    if 2 * n * d <= 1:
+        return mpmath.mpf(1)  # D >= 1 / (2 n) for every sample
+    extra = 20 + math.ceil(0.87 * n * d * d)
+    with mpmath.extradps(extra):
+        p = 1 - _mp_kolmogorov_cdf_mtw(n, d)
+    return +p
+
+
+def _mp_kolmogorov_limit_sf(t: mpmath.mpf) -> mpmath.mpf:
+    """1 - K(t) for Kolmogorov's limit distribution K: 2 sum_{k>=1} (-1)^(k-1)
+    e^(-2 k^2 t^2) for t >= 1, else 1 - sqrt(2 pi) / t sum_{k>=1}
+    e^(-(2 k - 1)^2 pi^2 / (8 t^2)) (the Jacobi theta form; Feller 1948, eq. 2.6);
+    both series converge fast in their range."""
+    eps = mpmath.eps
+    total = mpmath.mpf(0)
+    k = 1
+    if t >= 1:
+        while True:
+            term = mpmath.exp(-2 * k * k * t * t)
+            total += term if k % 2 else -term
+            if term < eps * total:
+                return 2 * total
+            k += 1
+    while True:
+        term = mpmath.exp(-((2 * k - 1) ** 2) * mpmath.pi**2 / (8 * t * t))
+        total += term
+        if term < eps * total:
+            return 1 - mpmath.sqrt(2 * mpmath.pi) / t * total
+        k += 1
+
+
+def _mp_ks_pvalue(n: int, d: Fraction, method: float) -> mpmath.mpf:
+    if method in (0, 1):
+        return _mp_smirnov(n, d)
+    if method == 2:
+        return _mp_kolmogorov_sf(n, d)
+    if method == 3:
+        return _mp_kolmogorov_limit_sf(_mp_frac(d) * mpmath.sqrt(n))
+    return min(2 * _mp_smirnov(n, d), mpmath.mpf(1))
+
+
+def _mp_ks_1samp(x: list, method: mpmath.mpf):
+    xs = [float(v) for v in x]  # the inputs are doubles
+    d = _ks_statistic(xs, float(method))
+    return _mp_frac(d), _mp_ks_pvalue(len(xs), d, float(method))
+
+
+def ks_1samp_rounding_bound(x: tuple, method: float) -> float:
+    """max(kappa_p, 1) (kappa_D + n) 2^-53. D = i / n - x_(i) (or x_(i) - (i - 1) / n)
+    has one rounded quotient and one rounded difference, so it is off by up to
+    (i / n + D) 2^-53 at its maximising i: kappa_D = (i / n + D) / D. kappa_p =
+    |D p'(D) / p|, from a central difference at 40 digits; n counts generously the
+    rounded operations of the p-value."""
+    xs = sorted(float(v) for v in x)
+    n = len(xs)
+    d = _ks_statistic(xs, method)
+    d_plus = _ks_d(xs)[0]
+    if d == d_plus and method != 0:
+        frac = max(
+            Fraction(i + 1, n) for i, v in enumerate(xs) if Fraction(i + 1, n) - Fraction(v) == d
+        )
+    else:
+        frac = max(Fraction(i, n) for i, v in enumerate(xs) if Fraction(v) - Fraction(i, n) == d)
+    kappa_d = _mp_frac((frac + d) / d)
+    with mpmath.workdps(40):
+        step = d / 10**12
+        p = _mp_ks_pvalue(n, d, method)
+        p_up = _mp_ks_pvalue(n, d + step, method)
+        p_down = _mp_ks_pvalue(n, d - step, method)
+        kappa_p = abs((p_up - p_down) / (2 * _mp_frac(step)) * _mp_frac(d) / p) if p else 0
+    return float(max(kappa_p, 1) * (kappa_d + n) * mpmath.mpf(2) ** -53)
+
+
+def _sc_ks_1samp(x: list[float], method: float) -> tuple[float, float]:
+    alternative, mode = _KS_METHODS[method]
+    r = st.ks_1samp(x, st.uniform.cdf, alternative=alternative, method=mode)
+    return float(r.statistic), float(r.pvalue)
+
+
+KS_1SAMP = Spec(
+    name="ks_1samp",
+    description=(
+        "One-sample Kolmogorov-Smirnov test of x against the uniform distribution on (0, 1) "
+        "(F(x) = x): the statistic and its p-value; method 0 less (D- = max(F(x_(i)) - "
+        "(i - 1) / n), p = P(D- >= d)), 1 greater (D+ = max(i / n - F(x_(i))), p = P(D+ >= d)), "
+        "both exact (Birnbaum and Tingey 1951); two-sided with D = max(D+, D-) and p 2 exact "
+        "P(D >= d) (Marsaglia, Tsang and Wang 2003), 3 asymptotic (1 - K(d sqrt(n)), K "
+        "Kolmogorov's limit distribution), 4 approximate (min(2 P(D+ >= d), 1))"
+    ),
+    inputs=("x", "method"),
+    outputs=("statistic", "pvalue"),
+    tolerance=5e-12,
+    tolerance_reason=(
+        "For both outputs, by the rule of ttest_1samp. F is exact, and D = i / n - x_(i) (or "
+        "x_(i) - (i - 1) / n) has one rounded quotient and one rounded difference, so "
+        "kappa_D = (i / n + D) / D at the maximising i; the p-value adds kappa_p = "
+        "|D p'(D) / p|, and n counts generously its rounded operations "
+        "(ks_1samp_rounding_bound). The largest bound max(kappa_p, 1) (kappa_D + n) 2^-53 "
+        "on this grid is 3.3e-12 (n = 150, x pushed towards 0 by c = 1/2, D = 0.53, "
+        "p = 2.8e-40 one-sided, kappa_p = 197); 5e-12 is the smallest round value above it "
+        "(tested). SciPy is wrong at 4 two-sided exact points at n = 150 (up to 2.6e-6: it "
+        "switches to an approximation above n = 140); its worst below that is 3.6e-12"
+    ),
+    grid_description=(
+        "z_i = ((7919 (i + 1)) mod 2048 + 1/2) / 2048, i = 0..n-1 (distinct exact doubles), "
+        "and x = z, x = c z or x = 1 - c (1 - z) for c in {31/32, 7/8, 3/4, 5/8, 1/2} "
+        "and the evenly spread x_i = (2 i - 1) / (2 n) (12 samples per n), for n in {1, 2, 3, "
+        "5, 10, 20, 50, 100, 150} with methods 0 to 4, and x = z for n = 1100 with methods 0, "
+        "1, 3 and 4 (statrs's exact method stops at n = 169). D from 3.7e-4 to 0.93, p-value "
+        "from 2.8e-40 to 1"
+    ),
+    grid=_ks_grid,
+    mpmath_fn=_mp_ks_1samp,
+    scipy_name="scipy.stats.ks_1samp",
+    scipy_fn=_sc_ks_1samp,
+)
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -4511,7 +4765,7 @@ ALL: tuple[Spec, ...] = (
     GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF, LAPLACE_CDF, LAPLACE_SF, LAPLACE_PPF,
     CAUCHY_CDF, CAUCHY_SF, CAUCHY_PPF, LEVY_CDF, LEVY_SF, LEVY_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
-    SKEWTEST, MANNWHITNEYU, FISHER_EXACT,
+    SKEWTEST, MANNWHITNEYU, FISHER_EXACT, KS_1SAMP,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip

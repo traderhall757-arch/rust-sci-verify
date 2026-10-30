@@ -5,12 +5,13 @@ use harness::{Check, Dataset, Expected, Outcome, finish, workspace_root};
 use crate::expected;
 use statrs::distribution::{
     Beta, Cauchy, Chi, ChiSquared, ContinuousCDF, Erlang, Exp, FisherSnedecor, Gamma, Gumbel,
-    InverseGamma, Laplace, Levy, LogNormal, Normal, Pareto, StudentsT, Weibull,
+    InverseGamma, Laplace, Levy, LogNormal, Normal, Pareto, StudentsT, Uniform, Weibull,
 };
 use statrs::function::{beta, erf, gamma};
 use statrs::stats_tests::chisquare::chisquare;
 use statrs::stats_tests::f_oneway::f_oneway;
 use statrs::stats_tests::fisher::fishers_exact_with_odds_ratio;
+use statrs::stats_tests::ks_test::{KSOneSampleAlternativeMethod, ks_onesample};
 use statrs::stats_tests::mannwhitneyu::{MannWhitneyUMethod, mannwhitneyu};
 use statrs::stats_tests::skewtest::skewtest;
 use statrs::stats_tests::ttest_onesample::ttest_onesample;
@@ -187,6 +188,19 @@ fn mwu_method(code: f64) -> MannWhitneyUMethod {
         1.0 => MannWhitneyUMethod::Exact,
         2.0 => MannWhitneyUMethod::AsymptoticInclContinuityCorrection,
         3.0 => MannWhitneyUMethod::AsymptoticExclContinuityCorrection,
+        _ => panic!("method code {code}"),
+    }
+}
+
+/// The one-sample Kolmogorov-Smirnov method of a point's method code (see the
+/// dataset header).
+fn ks_method(code: f64) -> KSOneSampleAlternativeMethod {
+    match code {
+        0.0 => KSOneSampleAlternativeMethod::Less,
+        1.0 => KSOneSampleAlternativeMethod::Greater,
+        2.0 => KSOneSampleAlternativeMethod::TwoSidedExact,
+        3.0 => KSOneSampleAlternativeMethod::TwoSidedAsymptotic,
+        4.0 => KSOneSampleAlternativeMethod::TwoSidedApproximate,
         _ => panic!("method code {code}"),
     }
 }
@@ -962,6 +976,23 @@ fn statrs_matches_reference() {
             statistic_and_pvalue(fishers_exact_with_odds_ratio(
                 &table,
                 alternative(p.scalar("alternative")),
+            ))
+        }),
+        Check {
+            function: "statrs::stats_tests::ks_test::ks_onesample",
+            dataset: "ks_1samp",
+            expected: &[Expected {
+                finding: "053-statrs-ks-onesample",
+                points: expected::KS_1SAMP,
+            }],
+        }
+        .run(|p| {
+            let uniform = Uniform::new(0.0, 1.0).expect("valid parameters");
+            statistic_and_pvalue(ks_onesample(
+                p.inputs["x"].clone(),
+                &uniform,
+                ks_method(p.scalar("method")),
+                NaNPolicy::Error,
             ))
         }),
         // Near the end: it loops forever at 7 points (finding 020); the
