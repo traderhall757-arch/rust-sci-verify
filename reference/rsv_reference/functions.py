@@ -5,6 +5,7 @@ import math
 from fractions import Fraction
 
 import mpmath
+import numpy as np
 import scipy.special as sc
 import scipy.stats as st
 
@@ -4289,6 +4290,184 @@ KS_2SAMP = Spec(
     scipy_fn=_sc_ks_2samp,
 )
 
+# --- hypothesis tests: Anderson-Darling test -----------------------------------
+
+# The statistic of a sample x_(1) <= ... <= x_(n) against a fully specified cdf F with
+# tail S = 1 - F (Anderson and Darling 1954; D'Agostino and Stephens 1986, eq. 4.2):
+# A^2 = -n - (1 / n) sum_{i=1}^n (2 i - 1) (log F(x_(i)) + log S(x_(n+1-i))).
+# The p-value is the published approximation statrs uses (D'Agostino and Stephens
+# 1986, Table 4.9, for a normal sample with estimated mean and variance): with
+# z = A^2 (1 + 0.75 / n + 2.25 / n^2), p = exp(1.2937 - 5.709 z + 0.0186 z^2) for
+# z >= 0.6, exp(0.9177 - 4.279 z - 1.38 z^2) for 0.34 <= z < 0.6, 1 - exp(-8.318 +
+# 42.796 z - 59.938 z^2) for 0.2 <= z < 0.34, else 1 - exp(-13.436 + 101.14 z -
+# 223.73 z^2). It is an empirical fit, so it is checked only as that formula, at the
+# true A^2; it is smallest at z = 153.47 and rises again after, exceeding 1 above
+# z = 306.71. dist 0 is the uniform distribution
+# on (0, 1) (F(x) = x, which statrs computes exactly), 1 the exponential with rate 1
+# (F = 1 - e^-x, S = e^-x) at x >= 1/2, where statrs's cdf has no cancellation
+# (finding 023 is at small x).
+_AD_N = (1, 2, 3, 5, 10, 20, 50, 100)
+_AD_SCALES = (1.0, 7 / 8, 1 / 2, 1 / 8)
+_AD_TINY = ((1, 2.0**-120), (2, 2.0**-100), (5, 2.0**-40), (5, 2.0**-20))
+_AD_EXP_N = (5, 20, 100)
+_AD_EXP_WIDTHS = (1.0, 3.0)
+_AD_EXP_FAR = (10.0, 20.0, 30.0, 36.0, 38.0, 40.0, 100.0, 745.0, 800.0)
+_AD_BRANCHES = (("0.6", "1.2937", "-5.709", "0.0186", False),
+                ("0.34", "0.9177", "-4.279", "-1.38", False),
+                ("0.2", "-8.318", "42.796", "-59.938", True),
+                ("0", "-13.436", "101.14", "-223.73", True))  # fmt: skip
+
+
+def _ad_grid() -> list[tuple[tuple[float, ...], float]]:
+    grid = []
+    for n in _AD_N:
+        for c in _AD_SCALES:
+            for high in (False, True) if c != 1 else (False,):
+                grid.append((_ks_sample(n, c, high), 0.0))
+        grid.append((_ks_spread_sample(n), 0.0))
+    grid.extend((_ks_sample(n, c, False), 0.0) for n, c in _AD_TINY)
+    for n in _AD_EXP_N:
+        for w in _AD_EXP_WIDTHS:
+            x = tuple(0.5 + w * v for v in _ks_sample(n, 1.0, False))
+            grid.append((x, 1.0))
+            # The largest value moved far into the upper tail.
+            top = x.index(max(x))
+            grid.extend((x[:top] + (far,) + x[top + 1 :], 1.0) for far in _AD_EXP_FAR)
+    return grid
+
+
+def _mp_ad_logs(v: mpmath.mpf, dist: float) -> tuple[mpmath.mpf, mpmath.mpf]:
+    """(log F(v), log S(v))."""
+    if dist == 0:
+        return mpmath.log(v), mpmath.log(1 - v)
+    return mpmath.log(-mpmath.expm1(-v)), -v
+
+
+def _mp_ad_statistic(x: list, dist: float) -> mpmath.mpf:
+    xs = sorted(mpmath.mpf(float(v)) for v in x)  # the inputs are doubles
+    n = len(xs)
+    logs = [_mp_ad_logs(v, dist) for v in xs]
+    total = mpmath.fsum((2 * i + 1) * (logs[i][0] + logs[n - 1 - i][1]) for i in range(n))
+    return -n - total / n
+
+
+def _ad_z(a2: mpmath.mpf, n: int) -> mpmath.mpf:
+    return a2 * (1 + mpmath.mpf(3) / (4 * n) + mpmath.mpf(9) / (4 * n * n))
+
+
+def _ad_branch(z: mpmath.mpf):
+    return next(b for b in _AD_BRANCHES if z >= mpmath.mpf(b[0]))
+
+
+def _mp_ad_pvalue(z: mpmath.mpf) -> mpmath.mpf:
+    _, c0, c1, c2, complement = _ad_branch(z)
+    q = mpmath.mpf(c0) + mpmath.mpf(c1) * z + mpmath.mpf(c2) * z * z
+    return 1 - mpmath.exp(q) if complement else mpmath.exp(q)
+
+
+def _mp_anderson(x: list, dist: mpmath.mpf):
+    xs = [float(v) for v in x]
+    a2 = _mp_ad_statistic(xs, float(dist))
+    return a2, _mp_ad_pvalue(_ad_z(a2, len(xs)))
+
+
+def anderson_rounding_bound(x: tuple, dist: float) -> float:
+    """max(kappa_p, 1) (kappa_A + n) 2^-53. A careful method rounds F and S (each off
+    by 2^-53 relative, so each log by 2^-53 absolute) and each log (2^-53 relative):
+    kappa_A = (1 / n) sum (2 i - 1) (2 + |log F_(i)| + |log S_(n+1-i)|) / A^2, the
+    first part being 2 n. kappa_p = |z p'(z) / p| of the branch at z; n counts
+    generously the other rounded operations. The sum of the n terms is assumed
+    accurate (compensated or exact summation): where A^2 = -n - beta cancels, plain
+    summation in some orders loses more than this bound."""
+    xs = sorted(float(v) for v in x)
+    n = len(xs)
+    with mpmath.workdps(40):
+        logs = [_mp_ad_logs(mpmath.mpf(v), dist) for v in xs]
+        weighted = mpmath.fsum(
+            (2 * i + 1) * (abs(logs[i][0]) + abs(logs[n - 1 - i][1])) for i in range(n)
+        )
+        a2 = _mp_ad_statistic(xs, dist)
+        kappa_a = (2 * n + weighted / n) / a2
+        z = _ad_z(a2, n)
+        _, c0, c1, c2, complement = _ad_branch(z)
+        q = mpmath.mpf(c0) + mpmath.mpf(c1) * z + mpmath.mpf(c2) * z * z
+        dq = mpmath.mpf(c1) + 2 * mpmath.mpf(c2) * z
+        p = _mp_ad_pvalue(z)
+        kappa_p = abs(z * dq * (mpmath.exp(q) if complement else p) / p)
+        return float(max(kappa_p, 1) * (kappa_a + n) * mpmath.mpf(2) ** -53)
+
+
+def _sc_anderson(x: list[float], dist: float) -> tuple[float, float]:
+    # SciPy's statistic for a fully specified distribution (from logcdf and logsf);
+    # its Monte Carlo p-value is not used: SciPy has no counterpart of the published
+    # formula, so the formula is evaluated in doubles on SciPy's statistic.
+    r = st.goodness_of_fit(
+        st.uniform if dist == 0 else st.expon,
+        x,
+        known_params={"loc": 0.0, "scale": 1.0},
+        statistic="ad",
+        n_mc_samples=1,
+        rng=np.random.default_rng(0),
+    )
+    a2 = float(r.statistic)
+    z = a2 * (1 + 0.75 / len(x) + 2.25 / len(x) ** 2)
+    _, c0, c1, c2, complement = next(b for b in _AD_BRANCHES if z >= float(b[0]))
+    q = float(c0) + float(c1) * z + float(c2) * z * z
+    return a2, float(1 - np.exp(q) if complement else np.exp(q))
+
+
+ANDERSON = Spec(
+    name="anderson",
+    description=(
+        "Anderson-Darling test of x against a fully specified distribution (dist 0 uniform "
+        "on (0, 1), 1 exponential with rate 1): the statistic A^2 = -n - (1 / n) sum (2 i - 1) "
+        "(log F(x_(i)) + log(1 - F(x_(n+1-i)))) and the p-value of D'Agostino and Stephens's "
+        "approximation (1986, Table 4.9) at z = A^2 (1 + 0.75 / n + 2.25 / n^2): exp(1.2937 - "
+        "5.709 z + 0.0186 z^2) for z >= 0.6, exp(0.9177 - 4.279 z - 1.38 z^2) for z >= 0.34, "
+        "1 - exp(-8.318 + 42.796 z - 59.938 z^2) for z >= 0.2, else 1 - exp(-13.436 + "
+        "101.14 z - 223.73 z^2), evaluated exactly as written (an empirical fit for normal "
+        "samples with estimated parameters; smallest at z = 153.47, it rises after that and "
+        "exceeds 1 above z = 306.71)"
+    ),
+    inputs=("x", "dist"),
+    outputs=("statistic", "pvalue"),
+    tolerance=3e-12,
+    tolerance_reason=(
+        "For both outputs, by the rule of ttest_1samp. A careful method rounds F and S = 1 - F "
+        "(computed as the tail, not as 1 - F) and their logarithms, so A^2 is off by up to "
+        "about kappa_A 2^-53, kappa_A = (2 n + (1 / n) sum (2 i - 1) (|log F_(i)| + "
+        "|log S_(n+1-i)|)) / A^2; the p-value adds kappa_p = |z p'(z) / p| of its branch, and n "
+        "counts generously the other rounded operations (anderson_rounding_bound). The sum "
+        "of the n terms is taken as accurate (compensated summation costs little): at the "
+        "point below, where -n - beta cancels about 8700-fold, plain summation is 1.4e-12 "
+        "off in statrs's order and up to 7.6e-12 in other orders, so a method that sums "
+        "plainly is not careful by this rule. The largest bound "
+        "max(kappa_p, 1) (kappa_A + n) 2^-53 on this grid is 2.9e-12 (the evenly spread "
+        "uniform sample of 100 values, A^2 = 0.0115, the smallest on the grid); 3e-12 is the "
+        "smallest round value above it (tested). No grid point has z within 0.024 of a branch "
+        "boundary (tested), so rounding cannot change the branch. SciPy's statistic (and the "
+        "formula in doubles on it) is within 2.1e-13 everywhere"
+    ),
+    grid_description=(
+        "dist 0: z_i = ((7919 (i + 1)) mod 2048 + 1/2) / 2048, i = 0..n-1, as x = z, x = c z "
+        "or x = 1 - c (1 - z) for c in {7/8, 1/2, 1/8}, and the evenly spread x_i = (2 i - 1) "
+        "/ (2 n), for n in {1, 2, 3, 5, 10, 20, 50, 100}; x = c z for (n, c) in {(1, 2^-120), "
+        "(2, 2^-100), (5, 2^-40), (5, 2^-20)} (far from uniform: A^2 from 66 to 137). dist 1: "
+        "x = 1/2 + w z for n in {5, 20, 100} and w in {1, 3}, and the same with the largest "
+        "value replaced by 10, 20, 30, 36, 38, 40, 100, 745 or 800 (far in the upper tail). "
+        "A^2 from 0.0115 to 167, z from 0.0116 to 329, p-value from 4.4e-190 to 1.0e60 (9 "
+        "points with z above 153.47, where the formula rises again; one, z = 329, above 1)"
+    ),
+    grid=_ad_grid,
+    mpmath_fn=_mp_anderson,
+    scipy_name=(
+        "scipy.stats.goodness_of_fit(statistic='ad', known parameters).statistic; "
+        "p-value: the formula in doubles on SciPy's statistic"
+    ),
+    scipy_fn=_sc_anderson,
+)
+
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -4962,7 +5141,7 @@ ALL: tuple[Spec, ...] = (
     GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF, LAPLACE_CDF, LAPLACE_SF, LAPLACE_PPF,
     CAUCHY_CDF, CAUCHY_SF, CAUCHY_PPF, LEVY_CDF, LEVY_SF, LEVY_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
-    SKEWTEST, MANNWHITNEYU, FISHER_EXACT, KS_1SAMP, KS_2SAMP,
+    SKEWTEST, MANNWHITNEYU, FISHER_EXACT, KS_1SAMP, KS_2SAMP, ANDERSON,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip

@@ -3323,3 +3323,92 @@ def test_ks2_rounding_bound_matches_the_tolerance_reason():
     worst, point = max((functions.ks_2samp_rounding_bound(*p), p) for p in functions._ks2_grid())
     assert 4.5e-12 < worst <= functions.KS_2SAMP.tolerance
     assert (len(point[0]), len(point[1]), point[2]) == (101, 100, 0.0)
+
+
+def _ad_integral(x: tuple, dist: float) -> mpmath.mpf:
+    """A^2 = n int_0^1 (F_n - u)^2 / (u (1 - u)) du (Anderson and Darling 1954, in
+    u = F(x)), with F_n = k / n on [u_(k), u_(k+1)] and the antiderivative of
+    (c - u)^2 / (u (1 - u)) = c^2 / u + (1 - c)^2 / (1 - u) - 1, namely
+    c^2 log u - (1 - c)^2 log(1 - u) - u. The log terms at u = 0 (c = 0) and u = 1
+    (c = 1) vanish. 1 - u is formed from S directly, so it keeps its digits."""
+    xs = sorted(mpmath.mpf(v) for v in x)
+    n = len(xs)
+    us = [(v, 1 - v) if dist == 0 else (-mpmath.expm1(-v), mpmath.exp(-v)) for v in xs]
+    pts = [(mpmath.mpf(0), mpmath.mpf(1)), *us, (mpmath.mpf(1), mpmath.mpf(0))]
+
+    def anti(c, u, s):
+        total = -u
+        if c != 0:
+            total += c * c * mpmath.log(u)
+        if c != 1:
+            total -= (1 - c) ** 2 * mpmath.log(s)
+        return total
+
+    area = mpmath.fsum(
+        anti(mpmath.mpf(k) / n, *pts[k + 1]) - anti(mpmath.mpf(k) / n, *pts[k])
+        for k in range(n + 1)
+    )
+    return n * area
+
+
+def test_anderson_statistic_matches_the_integral_definition():
+    with mpmath.workdps(60):
+        for x, dist in functions._ad_grid():
+            a2 = functions._mp_ad_statistic(x, dist)
+            assert abs(a2 - _ad_integral(x, dist)) <= mpmath.mpf(10) ** -45 * a2, (x, dist)
+
+
+def test_anderson_statistic_matches_quadrature_and_the_one_value_closed_form():
+    with mpmath.workdps(30):
+        for x, dist in (((0.25, 0.5, 0.875), 0.0), ((0.5, 1.5, 3.0, 4.0), 1.0)):
+            xs = sorted(x)
+            n = len(xs)
+            us = [mpmath.mpf(v) if dist == 0 else -mpmath.expm1(-mpmath.mpf(v)) for v in xs]
+            edges = [mpmath.mpf(0), *us, mpmath.mpf(1)]
+            quad = n * mpmath.fsum(
+                mpmath.quad(lambda u, c=c: (c - u) ** 2 / (u * (1 - u)), edges[k : k + 2])
+                for k, c in ((k, mpmath.mpf(k) / n) for k in range(n + 1))
+            )
+            assert abs(functions._mp_ad_statistic(x, dist) - quad) < mpmath.mpf(10) ** -25
+        # n = 1: A^2 = -1 - log F(x) - log S(x).
+        a2 = functions._mp_ad_statistic((30.0,), 1.0)
+        assert abs(a2 - (-1 - mpmath.log(-mpmath.expm1(-30)) + 30)) < mpmath.mpf(10) ** -25
+
+
+def test_anderson_pvalue_is_the_published_formula():
+    # Hand-typed from D'Agostino and Stephens (1986, Table 4.9), one z per branch.
+    cases = {
+        0.1: 1 - math.exp(-13.436 + 101.14 * 0.1 - 223.73 * 0.01),
+        0.25: 1 - math.exp(-8.318 + 42.796 * 0.25 - 59.938 * 0.0625),
+        0.5: math.exp(0.9177 - 4.279 * 0.5 - 1.38 * 0.25),
+        2.0: math.exp(1.2937 - 5.709 * 2.0 + 0.0186 * 4.0),
+    }
+    with mpmath.workdps(50):
+        for z, p in cases.items():
+            assert abs(functions._mp_ad_pvalue(mpmath.mpf(z)) - p) <= 1e-14 * p
+        # Each branch starts at its boundary.
+        for low, below in (("0.6", "0.34"), ("0.34", "0.2"), ("0.2", "0")):
+            assert functions._ad_branch(mpmath.mpf(low))[0] == low
+            assert functions._ad_branch(mpmath.mpf(low) - mpmath.eps)[0] == below
+        # Smallest at z = 5.709 / (2 0.0186) = 153.47; above z = 306.71 it exceeds 1.
+        p = functions._mp_ad_pvalue
+        assert p(mpmath.mpf(153)) > p(mpmath.mpf("153.47")) < p(mpmath.mpf(154))
+        assert p(mpmath.mpf("306.70")) < 1 < p(mpmath.mpf("306.72"))
+        # z = A^2 (1 + 0.75 / n + 2.25 / n^2).
+        assert functions._ad_z(mpmath.mpf(1), 2) == mpmath.mpf("1.9375")
+
+
+def test_anderson_grid_stays_away_from_branch_boundaries():
+    with mpmath.workdps(40):
+        gaps = [
+            abs(functions._ad_z(functions._mp_ad_statistic(x, d), len(x)) - b)
+            for x, d in functions._ad_grid()
+            for b in (mpmath.mpf("0.2"), mpmath.mpf("0.34"), mpmath.mpf("0.6"))
+        ]
+    assert min(gaps) > 0.024
+
+
+def test_anderson_rounding_bound_matches_the_tolerance_reason():
+    worst, point = max((functions.anderson_rounding_bound(*p), p) for p in functions._ad_grid())
+    assert 2.8e-12 < worst <= functions.ANDERSON.tolerance
+    assert point == (functions._ks_spread_sample(100), 0.0)
