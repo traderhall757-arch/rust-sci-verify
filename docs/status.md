@@ -870,7 +870,8 @@ _Updated at the end of every session. Start here._
     spinning; this adds about 20 s (4 x the 5 s limit) to the test.
 
 - **Milestone 4, part 33: statrs Anderson-Darling test** (statrs
-  `stats_tests::anderson_darling::anderson_darling`; PR to come, open):
+  `stats_tests::anderson_darling::anderson_darling`;
+  [PR #47](https://github.com/traderhall757-arch/rust-sci-verify/pull/47), open):
   - New dataset `anderson` (128 points: the KS one-sample patterns against
     the uniform distribution, n = 1 to 100, plus 4 samples far from uniform;
     exponential samples 1/2 + w z, n = 5, 20, 100, with the largest value
@@ -900,7 +901,7 @@ _Updated at the end of every session. Start here._
 ## Next
 
 1. **Owner: review and merge the open PR** (Milestone 4 part 33, statrs
-   `anderson_darling`, finding 055): PR to come.
+   `anderson_darling`, finding 055): [PR #47](https://github.com/traderhall757-arch/rust-sci-verify/pull/47).
 2. **Milestone 4, continued** (next session; one family per PR):
    - All statrs hypothesis tests are now checked. **Suggested next:**
      puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
