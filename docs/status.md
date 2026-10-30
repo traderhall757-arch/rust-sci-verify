@@ -754,7 +754,7 @@ _Updated at the end of every session. Start here._
 
 - **Milestone 4, part 29: statrs Mann-Whitney U test** (statrs
   `stats_tests::mannwhitneyu`;
-  [PR #43](https://github.com/traderhall757-arch/rust-sci-verify/pull/43), open):
+  [PR #43](https://github.com/traderhall757-arch/rust-sci-verify/pull/43), merged):
   - New dataset `mannwhitneyu` (690 points: two samples from the distinct
     integers (7919 i) mod 1000, x shifted by d; sizes 3 + 6 to 20 + 8 with
     all four methods (automatic, exact, asymptotic with and without
@@ -780,25 +780,54 @@ _Updated at the end of every session. Start here._
     one sample has at most 8 values (in the finding's notes, no listed
     points).
 
+- **Milestone 4, part 30: statrs Fisher's exact test** (statrs
+  `stats_tests::fisher::fishers_exact_with_odds_ratio`;
+  [PR #44](https://github.com/traderhall757-arch/rust-sci-verify/pull/44), open):
+  - New dataset `fisher_exact` (411 points: published tables (SciPy's
+    documentation, Fisher's tea tasting, statrs's fisher test cases), the first 12
+    tables with another table at most 1e-4 more probable, and tables by their
+    margins from 8 to 1900 values with the first cell from end to end of its
+    support; three alternatives; outputs odds ratio and p-value; tolerance
+    1e-13 from the rounding bound, largest 7.8e-14, tested). Reference:
+    exact table counts C(n1, x) C(n2, n - x) in integer arithmetic, tested
+    against enumeration of labellings, `mpmath.binomial` at 60 digits and
+    the published values. SciPy passes every point (worst 2.0e-15). Tables
+    with b c = 0 (odds ratio +inf) are left out: the generator would tag
+    them `overflow`, and a finite p-value there is judged crate wrong
+    (statrs's p-value is wrong on them too; in finding 051's notes).
+  - `fishers_exact_with_odds_ratio` fails 165 points. **Finding 051** (high),
+    approved by Claude after the checklist, covers 51 two-sided points: the
+    upper tail is `1 - cdf` (2.2e-14 instead of 2.2e-59, and a negative
+    p-value for a table of statrs's own tests), and a 1e-4 tie window adds
+    more probable tables (0.529 instead of 0.368). **Finding 052** (high),
+    approved likewise, covers the other 114: `Hypergeometric::pmf` is NaN
+    once a binomial coefficient exceeds the largest double (populations
+    from about 1030; a two-sided p of 0.493 instead of 0.051), and
+    `Hypergeometric::cdf` sums exp of large log terms (one-sided p-values up
+    to 1.5e-12 off on the grid, 6.1e-12 off it).
+  - Random scan (seed 20261030, 3,000 tables) and a search for near ties:
+    all failures from these causes; a bit-exact copy with all four remedies
+    passes every grid, random and near-tie point.
+
 ## Next
 
-1. **Owner: review and merge the open PR** (Milestone 4 part 29, statrs
-   `mannwhitneyu`, finding 050).
+1. **Owner: review and merge the open PR** (Milestone 4 part 30, statrs
+   `fishers_exact`, findings 051 and 052).
 2. **Milestone 4, continued** (next session; one family per PR):
    - **Remaining statrs hypothesis tests** (suggested next): `ks_onesample` /
-     two-sample (exact distributions),
-     `fishers_exact` (hypergeometric sums), `anderson_darling` (its p-value
+     two-sample (exact distributions), `anderson_darling` (its p-value
      is an empirical approximation by design: check the statistic, and the
      p-value only against the same published formula). Each needs its exact
      distribution in mpmath. Expect the `1 - cdf` pattern of findings
-     026 to 029.
+     026 to 029 and 051.
    - puruspe `invgammp` (calls `gammp`, so finding 034's small-x shortcut
      and finding 002's NaN may break it) on `gamma_ppf`; puruspe `invbetai`
      on `betaincinv`; puruspe `erf`/`erfc`/`inverfc` on `erfc`/`norm_ppf`.
    - Not yet listed anywhere: statrs `Triangular` and `Uniform` (closed form,
      continuous) and the discrete distributions (`Poisson`, `Binomial`,
      `Geometric`, `Hypergeometric`, ...); the owner decides whether they belong
-     in Milestone 4.
+     in Milestone 4. `Hypergeometric` already has finding 052 (seen through
+     Fisher's test).
    - Optional: the K result of `Inu_Knu` on the `kv` grid (finding 008's
      code path).
    - Keep expected lists small: vector inputs are listed value by value, so
@@ -812,7 +841,7 @@ _Updated at the end of every session. Start here._
 
 - Findings 001 to 004 approved; finding 005 approved (same day, after PR #12).
   Finding 006 and the J part of 005 approved by Claude (checklist); findings
-  007 to 050 likewise (and finding 002's two extensions, 2026-10-15).
+  007 to 052 likewise (and finding 002's two extensions, 2026-10-15).
 - **Claude approves future findings itself**, after the confirmation
   checklist in `findings/README.md` (reproduction, arbiter check, second
   opinion, off-grid check, root cause). Upstream contact still needs the
@@ -857,7 +886,7 @@ _Updated at the end of every session. Start here._
   `digamma` and `trigamma` about 3 s together; `beta_cdf` and `beta_sf`
   about 17 s together; `f_cdf` and `f_sf` about 23 s together, `f_ppf`
   about 6 minutes; the three `expon` datasets about 3 s; `chi_ppf` about
-  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s;
+  15 s and `chi_cdf` + `chi_sf` about 1 s; the three `weibull` datasets under 1 s; the three `gumbel` datasets about 1 s; the three `laplace` datasets about 1 s; the three `levy` datasets about 1 s; `mannwhitneyu` under 1 s; `fisher_exact` about 2 s;
   a full regeneration now takes about 26 minutes.
 - `yv` and `yv_large` take about 10 s together; `jv` and `jv_large` about 1 s; the three `iv` datasets about 1 s; the three `norm` datasets about 2 s. The `yv` grids leave out
   x = 0 (a pole; `Jnu_Ynu` documents a panic there).

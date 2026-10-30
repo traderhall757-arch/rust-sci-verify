@@ -3661,6 +3661,183 @@ MANNWHITNEYU = Spec(
     scipy_fn=_sc_mannwhitneyu,
 )
 
+# --- hypothesis tests: Fisher's exact test -------------------------------------
+
+# 2x2 tables [[a, b], [c, d]] by their margins: row sums n1 = a + b and n2 = c + d,
+# first column n = a + c, and a at the ends of its support, next to them, and at
+# mode + k sd for k in _FISHER_SDS (sd of the hypergeometric distribution of a).
+# Every row and column sum is positive (statrs and SciPy return p = 1 and odds
+# ratio NaN otherwise, a convention, not a value), and b c > 0: an odds ratio of
+# +inf is a division by zero, not a large finite value, yet the generator would tag
+# it overflow, and at an overflow point a finite p-value, even a right one, is
+# judged crate wrong.
+# Above about 1030 values C(n1 + n2, n) exceeds the largest double, so the
+# largest margins test that.
+_FISHER_MARGINS = (
+    (3, 5, 4),
+    (5, 5, 5),
+    (10, 10, 8),
+    (8, 30, 12),
+    (20, 20, 20),
+    (50, 40, 30),
+    (100, 100, 100),
+    (200, 50, 60),
+    (400, 400, 400),
+    (600, 600, 300),
+    (1000, 900, 700),
+)
+_FISHER_SDS = (-8, -4, -2, -1, -0.5, 0, 0.5, 1, 2, 4, 8)
+# Published tables: SciPy's documentation (8, 2, 1, 5) and (6, 2, 1, 4), Fisher's
+# tea tasting (3, 1, 1, 3), and the 7 tables of statrs's fisher test cases.
+_FISHER_PUBLISHED = (
+    (8, 2, 1, 5),
+    (6, 2, 1, 4),
+    (3, 1, 1, 3),
+    (3, 5, 4, 50),
+    (61, 118, 2, 1),
+    (172, 46, 90, 127),
+    (127, 38, 112, 43),
+    (186, 177, 111, 154),
+    (137, 49, 135, 183),
+    (37, 115, 37, 152),
+)
+
+
+def _fisher_support(n1: int, n2: int, n: int) -> tuple[int, int]:
+    return max(0, n - n2), min(n, n1)
+
+
+def _fisher_near_ties(count: int = 12) -> list[tuple[int, int, int, int]]:
+    """The first `count` tables (by total, then n1 <= n <= n2) whose probability
+    is below another table's by at most 1e-4 relative: the two-sided p-value must
+    leave that more probable table out (statrs's tie window is 1e-4 wide)."""
+    found = []
+    for total in itertools.count(4):
+        for n1 in range(1, total // 2 + 1):
+            for n in range(n1, total - n1 + 1):
+                n2 = total - n1
+                lo, hi = _fisher_support(n1, n2, n)
+                w = [math.comb(n1, x) * math.comb(n2, n - x) for x in range(lo, hi + 1)]
+                s = sorted(set(w))
+                for u, v in itertools.pairwise(s):
+                    a = lo + w.index(u)
+                    table = (a, n1 - a, n - a, n2 - n + a)
+                    if (v - u) * 10**4 <= v and table[1] * table[2] > 0:
+                        found.append(table)
+                        if len(found) == count:
+                            return found
+    raise AssertionError("unreachable")
+
+
+def _fisher_tables() -> list[tuple[int, int, int, int]]:
+    tables = list(_FISHER_PUBLISHED) + _fisher_near_ties()
+    for n1, n2, n in _FISHER_MARGINS:
+        lo, hi = _fisher_support(n1, n2, n)
+        N = n1 + n2
+        mean = n * n1 / N
+        sd = math.sqrt(n * n1 * n2 * (N - n) / (N * N * (N - 1)))
+        mode = (n + 1) * (n1 + 1) // (N + 2)
+        picks = {lo, lo + 1, hi - 1, hi, mode}
+        picks |= {round(mean + k * sd) for k in _FISHER_SDS}
+        for a in sorted(v for v in picks if lo <= v <= hi):
+            table = (a, n1 - a, n - a, n2 - (n - a))
+            if table[1] * table[2] > 0 and table not in tables:
+                tables.append(table)
+    return tables
+
+
+def _fisher_grid() -> list[tuple[float, float, float, float, float]]:
+    return [(*map(float, t), alt) for t in _fisher_tables() for alt in _TTEST_ALTERNATIVES]
+
+
+def _fisher_weights(a: int, b: int, c: int, d: int) -> tuple[list[int], int, int]:
+    """w[x - lo] = C(n1, x) C(n2, n - x) for x in the support of the first cell: the
+    number of tables with these margins and first cell x (its hypergeometric
+    probability times C(n1 + n2, n)); also lo and the total C(n1 + n2, n)."""
+    n1, n2, n = a + b, c + d, a + c
+    lo, hi = _fisher_support(n1, n2, n)
+    w = [math.comb(n1, x) * math.comb(n2, n - x) for x in range(lo, hi + 1)]
+    return w, lo, math.comb(n1 + n2, n)
+
+
+def _fisher_pvalue_counts(a: int, b: int, c: int, d: int, alternative: float) -> tuple[int, int]:
+    """The p-value as (count, total), exactly: P(X <= a) (less), P(X >= a) (greater),
+    or the sum of P(x) over every x with P(x) <= P(a) (two-sided), for X the first
+    cell under the null hypothesis (hypergeometric, margins fixed)."""
+    w, lo, total = _fisher_weights(a, b, c, d)
+    i = a - lo
+    if alternative < 0:
+        return sum(w[: i + 1]), total
+    if alternative > 0:
+        return sum(w[i:]), total
+    return sum(v for v in w if v <= w[i]), total
+
+
+def _mp_fisher_exact(a, b, c, d, alternative):
+    a, b, c, d = (int(v) for v in (a, b, c, d))
+    odds = mpmath.mpf(a * d) / (b * c)  # the sample odds ratio; b c > 0 on the grid
+    count, total = _fisher_pvalue_counts(a, b, c, d, float(alternative))
+    return odds, min(mpmath.mpf(count) / total, mpmath.mpf(1))
+
+
+def fisher_exact_rounding_bound(
+    a: float, b: float, c: float, d: float, alternative: float
+) -> float:
+    """max(kappa_p, 1) (kappa + n) 2^-53 with kappa = 0 (whole-number inputs) and
+    kappa_p = 1 (a ratio of exact counts); n = the number of hypergeometric terms
+    in the support, a generous count of the rounded operations of a careful sum
+    of the smaller tail. The odds ratio is a d / (b c), within 2 ulp."""
+    lo, hi = _fisher_support(int(a + b), int(c + d), int(a + c))
+    return float((hi - lo + 1) * mpmath.mpf(2) ** -53)
+
+
+def _sc_fisher_exact(a: float, b: float, c: float, d: float, alternative: float):
+    r = st.fisher_exact(
+        [[int(a), int(b)], [int(c), int(d)]], alternative=_TTEST_ALTERNATIVES[alternative]
+    )
+    return float(r.statistic), float(r.pvalue)
+
+
+FISHER_EXACT = Spec(
+    name="fisher_exact",
+    description=(
+        "Fisher's exact test on the 2x2 table [[a, b], [c, d]]: the sample odds ratio "
+        "a d / (b c) and the p-value from the hypergeometric "
+        "distribution of the first cell with all margins fixed; alternative -1 less "
+        "(P(X <= a)), 0 two-sided (the sum of P(x) over every x with P(x) <= P(a), "
+        "compared exactly, at most 1), 1 greater (P(X >= a))"
+    ),
+    inputs=("a", "b", "c", "d", "alternative"),
+    outputs=("statistic", "pvalue"),
+    tolerance=1e-13,
+    tolerance_reason=(
+        "For both outputs, by the rule of ttest_1samp. The inputs are whole numbers "
+        "(condition number 0) and the p-value is a ratio of exact counts (kappa_p = 1), so "
+        "only rounding counts: n 2^-53 with n the number of hypergeometric terms in the "
+        "support, a generous count for a careful sum of the smaller tail "
+        "(fisher_exact_rounding_bound). The largest bound on this grid is 7.8e-14 "
+        "(margins 1000, 900, 700: 701 terms); 1e-13 is the smallest round value above it "
+        "(tested). The odds ratio is two products and a quotient, exact or within 2 ulp"
+    ),
+    grid_description=(
+        "Published tables (SciPy's documentation, Fisher's tea tasting, statrs's "
+        "fisher test cases: 10 tables), the first 12 tables (by total, then n1 <= n <= n2) whose "
+        "probability is below another table's by at most 1e-4 relative (the first is "
+        "(6, 9, 16, 41)), and tables by their margins (n1 = a + b, n2 = c + d, "
+        "n = a + c) in {(3, 5, 4), (5, 5, 5), (10, 10, 8), (8, 30, 12), (20, 20, 20), "
+        "(50, 40, 30), (100, 100, 100), (200, 50, 60), (400, 400, 400), (600, 600, 300), "
+        "(1000, 900, 700)} with a at both ends of its support, next to them, at the mode, "
+        "and at the mean + k sd for k in {+-8, +-4, +-2, +-1, +-0.5, 0}; each with "
+        "alternative -1 (less), 0 (two-sided) and 1 (greater). No row or column sum is "
+        "zero, and b c > 0 (an infinite odds ratio would be tagged overflow, and a "
+        "finite p-value at an overflow point is judged crate wrong), which leaves out a at the top of its support"
+    ),
+    grid=_fisher_grid,
+    mpmath_fn=_mp_fisher_exact,
+    scipy_name="scipy.stats.fisher_exact",
+    scipy_fn=_sc_fisher_exact,
+)
+
 # --- betaincinv ----------------------------------------------------------------
 
 # The betainc parameters; probabilities as for gamma_ppf, with fewer in the bulk.
@@ -4334,7 +4511,7 @@ ALL: tuple[Spec, ...] = (
     GUMBEL_CDF, GUMBEL_SF, GUMBEL_PPF, LAPLACE_CDF, LAPLACE_SF, LAPLACE_PPF,
     CAUCHY_CDF, CAUCHY_SF, CAUCHY_PPF, LEVY_CDF, LEVY_SF, LEVY_PPF,
     BETAINCINV, BETA_CDF, BETA_SF, TTEST_1SAMP, CHISQUARE, F_ONEWAY,
-    SKEWTEST, MANNWHITNEYU,
+    SKEWTEST, MANNWHITNEYU, FISHER_EXACT,
     F_CDF, F_SF, F_PPF,
     GAMMALN, GAMMASGN, GAMMAINC_LARGE, DIGAMMA, TRIGAMMA,
 )  # fmt: skip
